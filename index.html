@@ -27,7 +27,7 @@ async function transcribeClips(){
   let parts=[];
   for(let i=0;i<names.length;i++){
    const c=p.clips[i];if(!c)continue;
-   const file=files[p.id+':'+i]||await loadFile(p.id+':'+i];
+   const file=files[p.id+':'+i]||await loadFile(p.id+':'+i);
    if(!file)throw Error('Missing stored clip: '+c.name);
    status.textContent='Transcribing '+(i+1)+'/7: '+names[i];
    const array=await file.arrayBuffer();
