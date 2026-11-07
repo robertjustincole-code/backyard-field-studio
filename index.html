@@ -1,13 +1,232 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#183c2e"><title>Backyard Field Studio</title><style>body{font:16px system-ui;margin:0;background:#f5f7f1;color:#19352b}header{background:#193d30;color:white;padding:20px}main{max-width:760px;margin:auto;padding:16px}button,input,textarea{font:inherit}button{background:#245e44;color:white;border:0;border-radius:9px;padding:11px;margin:4px;cursor:pointer}input,textarea{padding:9px;border:1px solid #a8b8aa;border-radius:8px;max-width:95%}section{background:white;padding:16px;border-radius:13px;margin:14px 0;box-shadow:0 1px 5px #ddd}small{color:#576b60}video{width:100%;max-height:360px;background:black}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.muted{background:#e5eee7;color:#19352b}.hidden{display:none}label{display:block;margin:8px 0}progress{width:100%}</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><div id="projects"></div></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#183c2e"><title>Backyard Field Studio</title><style>body{font:16px system-ui;margin:0;background:#f5f7f1;color:#19352b}header{background:#193d30;color:white;padding:20px}main{max-width:760px;margin:auto;padding:16px}button,input,textarea{font:inherit}button{background:#245e44;color:white;border:0;border-radius:9px;padding:11px;margin:4px;cursor:pointer}input,textarea{padding:9px;border:1px solid #a8b8aa;border-radius:8px;max-width:95%}section{background:white;padding:16px;border-radius:13px;margin:14px 0;box-shadow:0 1px 5px #ddd}small{color:#576b60}video{width:100%;max-height:360px;background:black}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.muted{background:#e5eee7;color:#19352b}.hidden{display:none}label{display:block;margin:8px 0}progress{width:100%}
+.grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid input{box-sizing:border-box;width:100%;max-width:100%}
+.timeline{position:relative;margin:8px 22px;height:52px;touch-action:none;user-select:none;cursor:crosshair}
+.timeline[hidden]{display:none}
+.trim-rail,.trim-band{position:absolute;top:21px;height:10px;border-radius:5px;pointer-events:none}
+.trim-rail{left:0;right:0;background:#d2ddd4}
+.trim-band{background:#70af86}
+.trim-handle{position:absolute;top:4px;margin:0;width:36px;height:44px;padding:0;cursor:ew-resize;background:#245e44}
+.trim-handle.start-handle{transform:translateX(-100%);border-radius:8px 2px 2px 8px}
+.trim-handle.end-handle{border-radius:2px 8px 8px 2px}
+.trim-handle:focus-visible{z-index:1;outline:3px solid #153b94}
+.playhead{position:absolute;top:13px;height:26px;width:3px;background:#15241c;pointer-events:none;transform:translateX(-50%)}
+.scrub{width:100%;padding:0;accent-color:#245e44}
+.clip-controls:disabled{opacity:.6}
+.timeline{margin-inline:36px}
+</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><div id="projects"></div></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
 const names=['Species introduction','Mission introduction','Species interaction','iNaturalist identification','Field guide (optional)','Interesting facts','Closing'];let projects=[],active=null,files={},db=null;try{const saved=JSON.parse(localStorage.getItem('bfs_projects')||'[]');projects=Array.isArray(saved)?saved:[]}catch(e){console.warn('Saved projects unavailable',e)}const $=id=>document.getElementById(id);
 function persist(){try{localStorage.setItem('bfs_projects',JSON.stringify(projects))}catch(e){console.warn('Project storage failed',e);$('appWarning').textContent='Warning: project changes cannot be saved in this browser. Keep your original clips.'}}
 function view(id){for(const x of ['home','editor','queue','reusable'])$(x).classList.toggle('hidden',x!==id)}
-function back(){view('home');list()}
+function back(){clearClipEditors();view('home');list()}
 function list(){$('projects').innerHTML=projects.length?'':'<section>No species yet. Create your first project.</section>';projects.forEach(p=>{let d=document.createElement('section');let count=names.filter((n,i)=>i!==4&&p.clips?.[i]).length;d.innerHTML='<h3></h3><p></p><button>Open project</button>';d.querySelector('h3').textContent='#'+p.number+' '+(p.common||'Unnamed species');d.querySelector('p').textContent=count+'/6 required clips attached · '+Math.round(count/6*100)+'% complete';d.querySelector('button').onclick=()=>openProject(p.id);$('projects').append(d)})}
 function newProject(){let p={id:crypto.randomUUID(),number:Math.max(0,...projects.map(x=>x.number))+1,common:'',latin:'',notes:'',transcript:'',clips:{}};projects.push(p);persist();openProject(p.id)}
 function cur(){return projects.find(p=>p.id===active)}
 function saveMeta(){let p=cur();if(!p)return;for(const k of ['common','latin','notes'])p[k]=$(k).value;persist();$('heading').textContent='#'+p.number+' '+(p.common||'New species')}
-function openProject(id){active=id;let p=cur();view('editor');$('heading').textContent='#'+p.number+' '+(p.common||'New species');for(const k of ['common','latin','notes'])$(k).value=p[k]||'';$('segments').innerHTML='';names.forEach((name,i)=>{let s=document.createElement('section');s.innerHTML='<h3></h3><small class="fileState"></small><label>Choose video <input type="file" accept="video/*"></label><video controls playsinline></video><div class="grid"><label>Start (seconds)<input class="start" type="number" min="0" step=".1" value="0"></label><label>End (seconds)<input class="end" type="number" min="0" step=".1" value="0"></label></div><input class="scrub" type="range" min="0" max="100" value="0" style="width:95%"><div><button class="setStart muted">Set start at playhead</button><button class="setEnd muted">Set end at playhead</button></div>';s.querySelector('h3').textContent=(i+1)+'. '+name;let video=s.querySelector('video'),inp=s.querySelector('input[type=file]'),start=s.querySelector('.start'),end=s.querySelector('.end'),scrub=s.querySelector('.scrub');let c=p.clips[i];s.querySelector('.fileState').textContent=c?'✓ Saved: '+c.name:(i===4?'Optional, can skip':'○ Still needs filming');inp.onchange=async()=>{let f=inp.files[0];if(!f)return;try{await storeFile(id+':'+i,f)}catch(error){s.querySelector('.fileState').textContent='Could not save '+f.name+': '+error.message;inp.value='';return}files[id+':'+i]=f;p.clips[i]={name:f.name,start:0,end:0};persist();video.src=URL.createObjectURL(f);s.querySelector('.fileState').textContent='Saved: '+f.name;};video.onloadedmetadata=()=>{scrub.max=video.duration;end.value=p.clips[i]?.end||video.duration;start.value=p.clips[i]?.start||0;end.max=start.max=video.duration;if(p.clips[i]&&!p.clips[i].end){p.clips[i].end=video.duration;persist()}};video.ontimeupdate=()=>scrub.value=video.currentTime;scrub.oninput=()=>video.currentTime=Number(scrub.value);s.querySelector('.setStart').onclick=()=>{start.value=video.currentTime;update()};s.querySelector('.setEnd').onclick=()=>{end.value=video.currentTime;update()};function update(){if(!p.clips[i])return;p.clips[i].start=Number(start.value);p.clips[i].end=Number(end.value);persist()}start.onchange=end.onchange=update;let f=files[id+':'+i];if(f)video.src=URL.createObjectURL(f);else loadFile(id+':'+i).then(f=>{if(f){files[id+':'+i]=f;video.src=URL.createObjectURL(f)}});$('segments').append(s)})}
+let disposeClipEditors=[];
+function clearClipEditors(){
+ disposeClipEditors.forEach(dispose=>dispose());
+ disposeClipEditors=[];
+ $('segments').replaceChildren();
+}
+function openProject(id){
+ clearClipEditors();
+ active=id;
+ const project=cur();
+ view('editor');
+ $('heading').textContent='#'+project.number+' '+(project.common||'New species');
+ for(const key of ['common','latin','notes'])$(key).value=project[key]||'';
+ names.forEach((name,index)=>openClipEditor(project,name,index));
+}
+
+function openClipEditor(project,name,index){
+ const key=project.id+':'+index;
+ const section=document.createElement('section');
+ section.innerHTML=`
+  <h3></h3><small class="fileState"></small>
+  <label>Choose video <input type="file" accept="video/*"></label>
+  <video controls playsinline preload="metadata"></video>
+  <div class="timeline" hidden>
+   <div class="trim-rail"></div><div class="trim-band"></div><div class="playhead"></div>
+   <button type="button" class="trim-handle start-handle" aria-label="Trim start handle">⟷</button>
+   <button type="button" class="trim-handle end-handle" aria-label="Trim end handle">⟷</button>
+  </div>
+  <label>Playhead <input class="scrub clip-controls" type="range" min="0" max="0" value="0" step="any" disabled></label>
+  <div class="grid">
+   <label>Start (seconds)<input class="start clip-controls" type="number" min="0" step="0.01" disabled></label>
+   <label>End (seconds)<input class="end clip-controls" type="number" min="0" step="0.01" disabled></label>
+  </div>
+  <small class="trim-length"></small>
+  <div>
+   <button type="button" class="play-selection clip-controls" disabled>Play selection</button>
+   <button type="button" class="setStart muted clip-controls" disabled>Set start at playhead</button>
+   <button type="button" class="setEnd muted clip-controls" disabled>Set end at playhead</button>
+  </div>
+  <p class="preview-status" role="status"></p>`;
+ const select=selector=>section.querySelector(selector);
+ const video=select('video'),input=select('input[type=file]'),fileState=select('.fileState');
+ const start=select('.start'),end=select('.end'),scrub=select('.scrub');
+ const timeline=select('.timeline'),band=select('.trim-band'),playhead=select('.playhead');
+ const startHandle=select('.start-handle'),endHandle=select('.end-handle');
+ const play=select('.play-selection'),status=select('.preview-status');
+ const controls=section.querySelectorAll('.clip-controls');
+ let url,disposed=false,selectionEnd=null,frame=0,drag=null;
+ const clip=()=>project.clips[index];
+ const format=time=>String(Number(time.toFixed(3)));
+ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+ const percent=time=>time/video.duration*100+'%';
+ section.querySelector('h3').textContent=(index+1)+'. '+name;
+ fileState.textContent=clip()?'✓ Saved: '+clip().name:(index===4?'Optional, can skip':'○ Still needs filming');
+ $('segments').append(section);
+
+ function updatePlayhead(){
+  if(!Number.isFinite(video.duration)||video.duration<=0)return;
+  scrub.value=video.currentTime;
+  playhead.style.left=percent(video.currentTime);
+ }
+ function drawTrim(){
+  const {start:begin,end:finish}=clip();
+  start.value=format(begin);
+  end.value=format(finish);
+  band.style.left=startHandle.style.left=percent(begin);
+  endHandle.style.left=percent(finish);
+  band.style.width=percent(finish-begin);
+  startHandle.setAttribute('aria-label','Trim start handle, '+format(begin)+' seconds');
+  endHandle.setAttribute('aria-label','Trim end handle, '+format(finish)+' seconds');
+  select('.trim-length').textContent=format(finish-begin)+' seconds selected';
+ }
+ function stopSelection(){
+  selectionEnd=null;
+  cancelAnimationFrame(frame);
+  play.textContent='Play selection';
+ }
+ function scrubTo(time){
+  stopSelection();
+  video.pause();
+  video.currentTime=time;
+  updatePlayhead();
+ }
+ function setTrim(edge,time){
+  const selection=clip();
+  if(!Number.isFinite(time)){drawTrim();return}
+  const gap=Math.min(0.01,video.duration);
+  const rounded=Math.round(time*1000)/1000;
+  selection[edge]=edge==='start'
+   ? clamp(rounded,0,Math.max(0,selection.end-gap))
+   : clamp(rounded,Math.min(video.duration,selection.start+gap),video.duration);
+  drawTrim();
+  scrubTo(selection[edge]);
+  persist();
+ }
+ function load(file){
+  stopSelection();
+  video.pause();
+  controls.forEach(control=>control.disabled=true);
+  timeline.hidden=true;
+  if(url)URL.revokeObjectURL(url);
+  url=URL.createObjectURL(file);
+  video.src=url;
+ }
+ video.onloadedmetadata=()=>{
+  const duration=video.duration;
+  if(!clip()||!Number.isFinite(duration)||duration<=0)return;
+  const selection=clip();
+  selection.start=clamp(selection.start||0,0,Math.max(0,duration-0.01));
+  selection.end=clamp(selection.end||duration,Math.min(duration,selection.start+0.01),duration);
+  scrub.max=start.max=end.max=duration;
+  controls.forEach(control=>control.disabled=false);
+  timeline.hidden=false;
+  drawTrim();
+  updatePlayhead();
+  persist();
+ };
+ video.ontimeupdate=updatePlayhead;
+ video.onpause=stopSelection;
+ video.onended=stopSelection;
+ start.onchange=()=>setTrim('start',start.valueAsNumber);
+ end.onchange=()=>setTrim('end',end.valueAsNumber);
+ scrub.oninput=()=>scrubTo(Number(scrub.value));
+ select('.setStart').onclick=()=>setTrim('start',video.currentTime);
+ select('.setEnd').onclick=()=>setTrim('end',video.currentTime);
+ play.onclick=async()=>{
+  status.textContent='';
+  if(selectionEnd!==null){video.pause();stopSelection();return}
+  video.currentTime=clip().start;
+  selectionEnd=clip().end;
+  play.textContent='Pause selection';
+  const tick=()=>{
+   if(selectionEnd===null)return;
+   if(!video.seeking&&video.currentTime>=selectionEnd){
+    const finish=selectionEnd;
+    video.pause();
+    stopSelection();
+    video.currentTime=finish;
+    updatePlayhead();
+    return;
+   }
+   frame=requestAnimationFrame(tick);
+  };
+  try{
+   await video.play();
+   tick();
+  }catch(error){
+   stopSelection();
+   if(error.name!=='AbortError')status.textContent='Could not play selection: '+error.message;
+  }
+ };
+ function movePointer(event){
+  const bounds=timeline.getBoundingClientRect();
+  const time=clamp((event.clientX-bounds.left-drag.offset)/bounds.width,0,1)*video.duration;
+  if(drag.edge)setTrim(drag.edge,time);
+  else scrubTo(time);
+ }
+ timeline.onpointerdown=event=>{
+  if(!event.isPrimary||event.button!==0)return;
+  const edge=event.target===startHandle?'start':event.target===endHandle?'end':null;
+  const bounds=timeline.getBoundingClientRect();
+  const offset=edge?event.clientX-(bounds.left+clip()[edge]/video.duration*bounds.width):0;
+  drag={id:event.pointerId,edge,offset};
+  timeline.setPointerCapture(event.pointerId);
+  if(!edge)movePointer(event);
+ };
+ timeline.onpointermove=event=>{if(drag?.id===event.pointerId)movePointer(event)};
+ timeline.onlostpointercapture=()=>{drag=null};
+ for(const [handle,edge] of [[startHandle,'start'],[endHandle,'end']]){
+  handle.onkeydown=event=>{
+   const direction={ArrowLeft:-1,ArrowDown:-1,ArrowRight:1,ArrowUp:1}[event.key];
+   if(!direction)return;
+   event.preventDefault();
+   setTrim(edge,clip()[edge]+direction*(event.shiftKey?0.1:0.01));
+  };
+ }
+ input.onchange=async()=>{
+  const file=input.files[0];
+  if(!file)return;
+  input.disabled=true;
+  try{
+   await storeFile(key,file);
+   files[key]=file;
+   project.clips[index]={name:file.name,start:0,end:0};
+   persist();
+   if(!disposed){load(file);fileState.textContent='Saved: '+file.name}
+  }catch(error){
+   fileState.textContent='Could not save '+file.name+': '+error.message;
+   input.value='';
+  }finally{input.disabled=false}
+ };
+ disposeClipEditors.push(()=>{
+  disposed=true;
+  stopSelection();
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  if(url)URL.revokeObjectURL(url);
+ });
+ if(files[key])load(files[key]);
+ else loadFile(key).then(file=>{
+  if(file&&!disposed&&!input.disabled&&!files[key]){files[key]=file;load(file)}
+ });
+}
 function showQueue(){view('queue');$('queueItems').innerHTML='';projects.forEach(p=>{let missing=names.filter((n,i)=>i!==4&&!p.clips[i]);let s=document.createElement('section');s.textContent='#'+p.number+' '+(p.common||'Unnamed')+': '+(missing.join(', ')||'Ready to render');$('queueItems').append(s)})}
 function showReusable(){view('reusable')}
 function copyTranscript(){navigator.clipboard.writeText($('transcript').value).then(()=>alert('Copied'))}

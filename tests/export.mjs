@@ -80,6 +80,33 @@ try {
     await section.locator('.end').press('Tab');
   }
 
+  const first = sections.nth(0);
+  const timeline = first.locator('.timeline');
+  const startHandle = first.getByRole('button', { name: /Trim start handle/ });
+  const endHandle = first.getByRole('button', { name: /Trim end handle/ });
+  await startHandle.press('ArrowRight');
+  assert.equal(await first.locator('.start').inputValue(), '0.31');
+  await startHandle.press('ArrowLeft');
+  const track = await timeline.boundingBox();
+  const handle = await endHandle.boundingBox();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 - track.width / 5, handle.y + handle.height / 2);
+  await page.mouse.up();
+  assert.ok(Math.abs(Number(await first.locator('.end').inputValue()) - 1) < 0.03);
+  await first.locator('.end').fill('1.3');
+  await first.locator('.end').press('Tab');
+  await first.getByRole('button', { name: 'Play selection' }).click();
+  await page.waitForFunction(() => {
+    const video = document.querySelector('#segments video');
+    return !video.paused && video.currentTime >= 0.3 && video.currentTime < 1.3;
+  });
+  await page.waitForFunction(() => {
+    const video = document.querySelector('#segments video');
+    return video.paused && Math.abs(video.currentTime - 1.3) < 0.04;
+  });
+  console.log('PASS: timeline handle drag, keyboard trim, and playback bounded by selection');
+
   await page.reload();
   await page.getByRole('button', { name: 'Open project' }).click();
   await page.waitForFunction(() => document.querySelector('#segments .start').value === '0.3',
