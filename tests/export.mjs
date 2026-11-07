@@ -25,7 +25,7 @@ try{
  await page.waitForFunction(()=>Object.keys(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips).length===6);
  await page.waitForTimeout(1500);
  await page.getByRole('button',{name:'Stitch video'}).click();
- await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Export complete')||document.querySelector('#status').textContent.includes('Render failed'),{timeout:90000});
+ await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Export complete')||document.querySelector('#status').textContent.includes('Render failed'),null,{timeout:90000});
  const status=await page.locator('#status').innerText();
  assert.match(status,/Export complete/,status);
  const link=page.locator('#download a');assert.equal(await link.count(),1);
