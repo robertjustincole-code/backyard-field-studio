@@ -18,7 +18,7 @@ try{
  assert.match(await page.locator('#heading').innerText(),/Horned crab/);
  assert.equal(await page.getByRole('navigation',{name:'Clip pages'}).getByRole('button').count(),7);
  await page.getByRole('button',{name:'← Projects'}).click();
- assert.match(await page.locator('#projects').innerText(),/0\/6 required clips/);
+ assert.match(await page.locator('#projects').innerText(),/0\/6 clips complete/);
  await page.getByRole('button',{name:'Filming queue'}).click();
  assert.match(await page.locator('#queueItems').innerText(),/Species introduction/);
  await page.getByRole('button',{name:'← Projects'}).click();
@@ -34,6 +34,18 @@ try{
    return video.currentTime;
  });
  assert.equal(seekResult,2.5);
+ assert.equal(await page.getByRole('checkbox',{name:'Clip complete'}).isDisabled(),true);
+ await page.getByRole('button',{name:'← Projects'}).click();
+ assert.match(await page.locator('#nextAction').innerText(),/Record Species introduction for #1 Horned crab/);
+ await page.getByRole('button',{name:'Go to next step'}).click();
+ assert.match(await page.locator('#clipTabs [aria-current=true]').innerText(),/Species introduction/);
+ await page.getByRole('checkbox',{name:/Posted to Instagram/}).check();
+ assert.equal(await page.locator('#projects section').count(),0);
+ await page.reload();
+ assert.match(await page.locator('#projectCount').innerText(),/0 active projects/);
+ await page.getByText('Archive (1)',{exact:true}).click();
+ await page.getByRole('button',{name:'Restore project'}).click();
+ assert.match(await page.locator('#projects').innerText(),/Horned crab/);
  assert.deepEqual(errors,[]);
  console.log('PASS: app boot, species CRUD, seven clip pages, filming queue, persistence, no JS errors');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}

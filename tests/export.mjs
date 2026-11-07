@@ -145,11 +145,26 @@ try {
   });
   console.log('PASS: timeline handle drag, keyboard trim, and playback bounded by selection');
 
+  const firstComplete = pages.nth(0).getByRole('checkbox', { name: 'Clip complete' });
+  await firstComplete.check();
+  await first.locator('.start').fill('0.31');
+  await first.locator('.start').press('Tab');
+  assert.equal(await firstComplete.isChecked(), false);
+  await first.locator('.start').fill('0.3');
+  await first.locator('.start').press('Tab');
+  await firstComplete.check();
+  await page.getByRole('button', { name: '← Projects' }).click();
+  assert.match(await page.locator('#projects').innerText(), /1\/6 clips complete/);
+  assert.match(await page.locator('#nextAction').innerText(), /Review and check off Mission introduction/);
+  await page.getByRole('button', { name: 'Go to next step' }).click();
+  assert.match(await page.locator('#clipTabs [aria-current=true]').innerText(), /Mission introduction/);
+
   await page.reload();
   await page.getByRole('button', { name: 'Open project' }).click();
   await page.waitForFunction(() => document.querySelector('#segments .start').value === '0.3',
     null, { polling: 100, timeout: 10000 });
   assert.equal(await speciesNumber.inputValue(), '42');
+  assert.equal(await firstComplete.isChecked(), true);
   const trims = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips)
     .map(({ start, end }) => [start, end]));
   assert.deepEqual(trims, [...slots.map(() => [0.3, 1.3]), [0.1, 1.3], [0.3, 1.3]]);
