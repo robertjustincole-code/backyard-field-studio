@@ -47,9 +47,12 @@ function openProject(id){
  $('speciesNumber').value=project.number;
  for(const key of ['common','latin','notes'])$(key).value=project[key]||'';
  names.forEach((name,index)=>openClipEditor(project,name,index));
+ openClipEditor(project,'iNaturalist narration (optional)','narration');
+ $('segments').children[3].after($('segments').lastElementChild);
 }
 
 function openClipEditor(project,name,index){
+ const isNarration=index==='narration';
  const key=project.id+':'+index;
  const section=document.createElement('section');
  section.innerHTML=`
@@ -72,6 +75,7 @@ function openClipEditor(project,name,index){
    <button type="button" class="setStart muted clip-controls" disabled>Set start at playhead</button>
    <button type="button" class="setEnd muted clip-controls" disabled>Set end at playhead</button>
   </div>
+  <button type="button" class="remove-narration muted" hidden>Remove narration</button>
   <p class="preview-status" role="status"></p>`;
  const select=selector=>section.querySelector(selector);
  const video=select('video'),input=select('input[type=file]'),fileState=select('.fileState');
@@ -85,8 +89,15 @@ function openClipEditor(project,name,index){
  const format=time=>String(Number(time.toFixed(3)));
  const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
  const percent=time=>time/video.duration*100+'%';
- section.querySelector('h3').textContent=(index+1)+'. '+name+(index===3?' (2× on export)':'');
- fileState.textContent=clip()?'✓ Saved: '+clip().name:(index===4?'Optional, can skip':'○ Still needs filming');
+ section.querySelector('h3').textContent=isNarration?name:(index+1)+'. '+name;
+ const remove=select('.remove-narration');
+ remove.hidden=!isNarration||!clip();
+ fileState.textContent=clip()?'✓ Saved: '+clip().name:(index===4||isNarration?'Optional, can skip':'○ Still needs filming');
+ if(isNarration){
+  const hint=document.createElement('p');
+  hint.textContent='Trim a video of yourself explaining the ID. Only its audio is exported. The screen recording adjusts to match your narration.';
+  fileState.after(hint);
+ }
  $('segments').append(section);
 
  function updatePlayhead(){
@@ -212,17 +223,29 @@ function openClipEditor(project,name,index){
  input.onchange=async()=>{
   const file=input.files[0];
   if(!file)return;
-  input.disabled=true;
+  input.disabled=remove.disabled=true;
   try{
    await storeFile(key,file);
    files[key]=file;
    project.clips[index]={name:file.name,start:0,end:0};
    persist();
-   if(!disposed){load(file);fileState.textContent='Saved: '+file.name}
+   if(!disposed){load(file);fileState.textContent='Saved: '+file.name;remove.hidden=!isNarration}
   }catch(error){
    fileState.textContent='Could not save '+file.name+': '+error.message;
    input.value='';
-  }finally{input.disabled=false}
+  }finally{input.disabled=remove.disabled=false}
+ };
+ remove.onclick=async()=>{
+  input.disabled=remove.disabled=true;
+  try{
+   await storeFile(key,null);
+   delete project.clips[index];
+   delete files[key];
+   persist();
+   if(!disposed)openProject(project.id);
+  }catch(error){
+   status.textContent='Could not remove narration: '+error.message;
+  }finally{input.disabled=remove.disabled=false}
  };
  disposeClipEditors.push(()=>{
   disposed=true;
@@ -313,6 +336,12 @@ async function render(){
    if(!file)throw Error('Missing local file: '+clip.name);
    clips.push({file,clip,name:names[i],speed:i===3?2:1});
   }
+  if(project.clips.narration){
+   const key=project.id+':narration';
+   const file=files[key]||await loadFile(key);
+   if(!file)throw Error('Missing local iNaturalist narration file');
+   clips[3].narration={file,clip:project.clips.narration};
+  }
   clips[0].title=await titleImage([
    'Species #'+project.number+':',project.common?.trim(),project.latin?.trim()
   ].filter(Boolean),56,1005);
@@ -320,7 +349,7 @@ async function render(){
   closing.title=await titleImage(['The world is incredible!','And so are you!'],62,1005);
   closing.tail=1;
   status.textContent='Loading the video encoder…';
-  worker=new Worker('export-worker.js?v=speed1');
+  worker=new Worker('export-worker.js?v=narration1');
   const video=await withTimeout(new Promise((resolve,reject)=>{
    worker.onmessage=({data})=>{
     if(data.error)reject(Error(data.error));
