@@ -15,7 +15,7 @@ const server = createServer((req, res) => {
 const slots = [0, 1, 2, 3, 5, 6];
 const colors = ['red', 'lime', 'blue', 'yellow', 'magenta', 'cyan'];
 const expected = [[255,0,0], [0,255,0], [0,0,255], [255,255,0], [255,0,255], [0,255,255]];
-let browser;
+let context;
 
 try {
   const clips = colors.map((color, index) => {
@@ -28,8 +28,9 @@ try {
     return path;
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  browser = await webkit.launch({ headless: false });
-  const page = await browser.newPage({ acceptDownloads: true });
+  // Playwright WebKit cannot persist File objects in its private contexts.
+  context = await webkit.launchPersistentContext(join(dir, 'profile'), { acceptDownloads: true });
+  const page = context.pages()[0] || await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => console.log('browser:', message.type(), message.text()));
@@ -39,9 +40,7 @@ try {
 
   for (const [index, slot] of slots.entries()) {
     const section = sections.nth(slot);
-    await section.locator('input[type=file]').setInputFiles({
-      name: colors[index] + '.mp4', mimeType: 'video/mp4', buffer: await readFile(clips[index])
-    });
+    await section.locator('input[type=file]').setInputFiles(clips[index]);
     const video = section.locator('video');
     try {
       await page.waitForFunction(i => {
@@ -119,7 +118,7 @@ try {
   }
   console.log('PASS: six saved clips trimmed in order, downloaded and decoded as portrait H.264/AAC MP4');
 } finally {
-  await browser?.close();
+  await context?.close();
   if (server.listening) await new Promise(resolve => server.close(resolve));
   await rm(dir, { recursive: true, force: true });
 }
