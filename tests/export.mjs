@@ -67,6 +67,9 @@ try {
   await page.getByRole('button', { name: 'Open project' }).click();
   await page.waitForFunction(() => document.querySelector('#segments .start').value === '0.3',
     null, { polling: 100, timeout: 10000 });
+  const trims = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips)
+    .map(({ start, end }) => [start, end]));
+  assert.deepEqual(trims, slots.map(() => [0.3, 1.3]));
   const status = page.locator('#status');
   await page.getByRole('button', { name: 'Stitch video' }).click();
   try {
@@ -94,6 +97,7 @@ try {
   assert.equal(video?.codec_name, 'h264');
   assert.equal(audio?.codec_name, 'aac');
   assert.deepEqual([video.width, video.height], [720, 1280]);
+  console.log('MP4 timing:', format.duration, 'seconds', video.avg_frame_rate, 'fps', audio.sample_rate, 'Hz');
   assert.ok(Math.abs(Number(format.duration) - 6) < 0.75, 'Expected six one-second trims: ' + format.duration);
   for (const [index, color] of expected.entries()) {
     const pixel = execFileSync('ffmpeg', [

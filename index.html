@@ -61,7 +61,7 @@ async function render(){
  status.textContent='Preparing export…';
  let audio,destination,stream,recorder,video,objectUrl;
  try{
-  audio=new AudioEngine();
+  audio=new AudioEngine({sampleRate:48000});
   // Resume while the Stitch button's user gesture is still active.
   await withTimeout(audio.resume(),10000,'Audio engine timed out');
   const items=[];
@@ -111,12 +111,12 @@ async function render(){
    const begin=Math.max(0,clip.start||0),finish=Math.min(video.duration,clip.end||video.duration);
    if(!(finish>begin))throw Error('Invalid trim for '+name);
    await seekVideo(video,begin);
+   await withTimeout(video.play(),12000,'Playback timed out: '+name);
    draw();
    if(recorderError)throw recorderError;
    if(index===0)recorder.start();
    else recorder.resume();
    status.textContent='Rendering clip '+(index+1)+'/'+items.length+': '+name;
-   await withTimeout(video.play(),12000,'Playback timed out: '+name);
    await new Promise((resolve,reject)=>{
     const deadline=performance.now()+Math.max(20000,(finish-begin+15)*1000);
     const tick=()=>{
