@@ -14,11 +14,11 @@
 .scrub{width:100%;padding:0;accent-color:#245e44}
 .clip-controls:disabled{opacity:.6}
 .timeline{margin-inline:36px}
-</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><div id="projects"></div></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Species number <input id="speciesNumber" type="number" min="1" step="1" inputmode="numeric" onchange="saveSpeciesNumber()"></label><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
+.clip-tabs{display:flex;gap:4px;overflow-x:auto;padding:4px 0;position:sticky;top:0;z-index:2;background:#f5f7f1}.clip-tabs button{flex:none;margin:0}.clip-tabs button[aria-current=true]{background:#193d30;color:white}.clip-tabs button:disabled{opacity:.55}</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><div id="projects"></div></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Species number <input id="speciesNumber" type="number" min="1" step="1" inputmode="numeric" onchange="saveSpeciesNumber()"></label><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><nav id="clipTabs" class="clip-tabs" aria-label="Clip pages"></nav><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
 const names=['Species introduction','Mission introduction','Species interaction','iNaturalist identification','Field guide (optional)','Interesting facts','Closing'];let projects=[],active=null,files={},db=null;try{const saved=JSON.parse(localStorage.getItem('bfs_projects')||'[]');projects=Array.isArray(saved)?saved:[]}catch(e){console.warn('Saved projects unavailable',e)}const $=id=>document.getElementById(id);
 function persist(){try{localStorage.setItem('bfs_projects',JSON.stringify(projects))}catch(e){console.warn('Project storage failed',e);$('appWarning').textContent='Warning: project changes cannot be saved in this browser. Keep your original clips.'}}
 function view(id){for(const x of ['home','editor','queue','reusable'])$(x).classList.toggle('hidden',x!==id)}
-function back(){clearClipEditors();view('home');list()}
+function back(){if(recordingVoiceover)return;clearClipEditors();view('home');list()}
 function list(){$('projects').innerHTML=projects.length?'':'<section>No species yet. Create your first project.</section>';projects.forEach(p=>{let d=document.createElement('section');let count=names.filter((n,i)=>i!==4&&p.clips?.[i]).length;d.innerHTML='<h3></h3><p></p><button>Open project</button>';d.querySelector('h3').textContent='#'+p.number+' '+(p.common||'Unnamed species');d.querySelector('p').textContent=count+'/6 required clips attached · '+Math.round(count/6*100)+'% complete';d.querySelector('button').onclick=()=>openProject(p.id);$('projects').append(d)})}
 function newProject(){let p={id:crypto.randomUUID(),number:Math.max(0,...projects.map(x=>x.number))+1,common:'',latin:'',notes:'',transcript:'',clips:{}};projects.push(p);persist();openProject(p.id)}
 function cur(){return projects.find(p=>p.id===active)}
@@ -32,11 +32,13 @@ function saveSpeciesNumber(){
  }
  input.value=project.number;
 }
-let disposeClipEditors=[];
+let disposeClipEditors=[],recordingVoiceover=false;
+const narrationKey=index=>index===3?'narration':'narration-'+index;
 function clearClipEditors(){
  disposeClipEditors.forEach(dispose=>dispose());
  disposeClipEditors=[];
  $('segments').replaceChildren();
+ $('clipTabs').replaceChildren();
 }
 function openProject(id){
  clearClipEditors();
@@ -46,18 +48,40 @@ function openProject(id){
  $('heading').textContent='#'+project.number+' '+(project.common||'New species');
  $('speciesNumber').value=project.number;
  for(const key of ['common','latin','notes'])$(key).value=project[key]||'';
- names.forEach((name,index)=>openClipEditor(project,name,index));
- openClipEditor(project,'iNaturalist narration (optional)','narration');
- $('segments').children[3].after($('segments').lastElementChild);
+ const pages=[],tabs=[];
+ const selectPage=index=>{
+  if(recordingVoiceover)return;
+  pages.forEach((page,i)=>{
+   page.hidden=i!==index;
+   if(page.hidden)page.querySelectorAll('video').forEach(video=>video.pause());
+   tabs[i].setAttribute('aria-current',String(i===index));
+  });
+ };
+ names.forEach((name,index)=>{
+  const page=document.createElement('div');
+  page.className='clip-page';
+  $('segments').append(page);
+  const footage=openClipEditor(project,name,index,page);
+  const voiceover=openClipEditor(project,'Voiceover (optional)',narrationKey(index),page,true);
+  addVoiceRecorder(project,index,footage,voiceover);
+  const tab=document.createElement('button');
+  tab.type='button';
+  tab.className='muted';
+  tab.textContent='Clip '+(index+1)+' · '+name;
+  tab.onclick=()=>selectPage(index);
+  $('clipTabs').append(tab);
+  pages.push(page);
+  tabs.push(tab);
+ });
+ selectPage(0);
 }
 
-function openClipEditor(project,name,index){
- const isNarration=index==='narration';
+function openClipEditor(project,name,index,page,isNarration=false){
  const key=project.id+':'+index;
  const section=document.createElement('section');
  section.innerHTML=`
   <h3></h3><small class="fileState"></small>
-  <label>Choose video <input type="file" accept="video/*"></label>
+  <label>Choose video <input type="file" accept="${isNarration?'video/*,audio/*':'video/*'}"></label>
   <video controls playsinline preload="metadata"></video>
   <div class="timeline" hidden>
    <div class="trim-rail"></div><div class="trim-band"></div><div class="playhead"></div>
@@ -88,20 +112,21 @@ function openClipEditor(project,name,index){
  const clip=()=>project.clips[index];
  const format=time=>String(Number(time.toFixed(3)));
  const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
- const percent=time=>time/video.duration*100+'%';
+ const mediaDuration=()=>Number.isFinite(video.duration)?video.duration:clip()?.recordedDuration;
+ const percent=time=>time/mediaDuration()*100+'%';
  section.querySelector('h3').textContent=isNarration?name:(index+1)+'. '+name;
  const remove=select('.remove-narration');
  remove.hidden=!isNarration||!clip();
  fileState.textContent=clip()?'✓ Saved: '+clip().name:(index===4||isNarration?'Optional, can skip':'○ Still needs filming');
  if(isNarration){
   const hint=document.createElement('p');
-  hint.textContent='Trim a video of yourself explaining the ID. Only its audio is exported. The screen recording adjusts to match your narration.';
+  hint.textContent='Record above or upload a video or audio file here. Trim the voiceover, and the footage will adjust to match it on export.';
   fileState.after(hint);
  }
- $('segments').append(section);
+ page.append(section);
 
  function updatePlayhead(){
-  if(!Number.isFinite(video.duration)||video.duration<=0)return;
+  if(!Number.isFinite(mediaDuration())||mediaDuration()<=0)return;
   scrub.value=video.currentTime;
   playhead.style.left=percent(video.currentTime);
  }
@@ -130,11 +155,11 @@ function openClipEditor(project,name,index){
  function setTrim(edge,time){
   const selection=clip();
   if(!Number.isFinite(time)){drawTrim();return}
-  const gap=Math.min(0.01,video.duration);
+  const gap=Math.min(0.01,mediaDuration());
   const rounded=Math.round(time*1000)/1000;
   selection[edge]=edge==='start'
    ? clamp(rounded,0,Math.max(0,selection.end-gap))
-   : clamp(rounded,Math.min(video.duration,selection.start+gap),video.duration);
+   : clamp(rounded,Math.min(mediaDuration(),selection.start+gap),mediaDuration());
   drawTrim();
   scrubTo(selection[edge]);
   persist();
@@ -149,7 +174,7 @@ function openClipEditor(project,name,index){
   video.src=url;
  }
  video.onloadedmetadata=()=>{
-  const duration=video.duration;
+  const duration=mediaDuration();
   if(!clip()||!Number.isFinite(duration)||duration<=0)return;
   const selection=clip();
   selection.start=clamp(selection.start||0,0,Math.max(0,duration-0.01));
@@ -197,7 +222,7 @@ function openClipEditor(project,name,index){
  };
  function movePointer(event){
   const bounds=timeline.getBoundingClientRect();
-  const time=clamp((event.clientX-bounds.left-drag.offset)/bounds.width,0,1)*video.duration;
+  const time=clamp((event.clientX-bounds.left-drag.offset)/bounds.width,0,1)*mediaDuration();
   if(drag.edge)setTrim(drag.edge,time);
   else scrubTo(time);
  }
@@ -205,7 +230,7 @@ function openClipEditor(project,name,index){
   if(!event.isPrimary||event.button!==0)return;
   const edge=event.target===startHandle?'start':event.target===endHandle?'end':null;
   const bounds=timeline.getBoundingClientRect();
-  const offset=edge?event.clientX-(bounds.left+clip()[edge]/video.duration*bounds.width):0;
+  const offset=edge?event.clientX-(bounds.left+clip()[edge]/mediaDuration()*bounds.width):0;
   drag={id:event.pointerId,edge,offset};
   timeline.setPointerCapture(event.pointerId);
   if(!edge)movePointer(event);
@@ -220,20 +245,23 @@ function openClipEditor(project,name,index){
    setTrim(edge,clip()[edge]+direction*(event.shiftKey?0.1:0.01));
   };
  }
- input.onchange=async()=>{
-  const file=input.files[0];
-  if(!file)return;
+ async function saveFile(file,recordedDuration){
   input.disabled=remove.disabled=true;
   try{
    await storeFile(key,file);
    files[key]=file;
-   project.clips[index]={name:file.name,start:0,end:0};
+   project.clips[index]={name:file.name,start:0,end:0,recordedDuration};
    persist();
    if(!disposed){load(file);fileState.textContent='Saved: '+file.name;remove.hidden=!isNarration}
-  }catch(error){
+  }finally{input.disabled=remove.disabled=false}
+ }
+ input.onchange=async()=>{
+  const file=input.files[0];
+  if(!file)return;
+  try{await saveFile(file)}catch(error){
    fileState.textContent='Could not save '+file.name+': '+error.message;
    input.value='';
-  }finally{input.disabled=remove.disabled=false}
+  }
  };
  remove.onclick=async()=>{
   input.disabled=remove.disabled=true;
@@ -242,7 +270,19 @@ function openClipEditor(project,name,index){
    delete project.clips[index];
    delete files[key];
    persist();
-   if(!disposed)openProject(project.id);
+   if(!disposed){
+    stopSelection();
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    if(url)URL.revokeObjectURL(url);
+    url=null;
+    input.value='';
+    remove.hidden=timeline.hidden=true;
+    controls.forEach(control=>control.disabled=true);
+    select('.trim-length').textContent='';
+    fileState.textContent='Optional, can skip';
+   }
   }catch(error){
    status.textContent='Could not remove narration: '+error.message;
   }finally{input.disabled=remove.disabled=false}
@@ -259,6 +299,100 @@ function openClipEditor(project,name,index){
  else loadFile(key).then(file=>{
   if(file&&!disposed&&!input.disabled&&!files[key]){files[key]=file;load(file)}
  });
+ return {section,video,saveFile};
+}
+function addVoiceRecorder(project,index,footage,voiceover){
+ const {section,video}=footage;
+ const button=document.createElement('button');
+ button.type='button';
+ button.textContent='Record voiceover';
+ const status=document.createElement('p');
+ status.setAttribute('role','status');
+ video.before(button,status);
+ let finish;
+ button.onclick=async()=>{
+  if(finish){finish();return}
+  if(recordingVoiceover||$('stitch').disabled)return;
+  const clip=project.clips[index];
+  if(!clip||video.readyState<1){
+   status.textContent='Add the main video before recording.';
+   return;
+  }
+  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){
+   status.textContent='Microphone recording is unavailable here. You can upload a voiceover below.';
+   return;
+  }
+  recordingVoiceover=true;
+  const locked=[...$('clipTabs').children,$('stitch')];
+  locked.forEach(control=>control.disabled=true);
+  button.disabled=true;
+  const muted=video.muted;
+  let stream,recorder,frame,started,recordingDuration;
+  try{
+   // Keep the Stop control outside the inert editing area.
+   section.before(button,status);
+   section.inert=voiceover.section.inert=true;
+   video.controls=false;
+   video.pause();
+   status.textContent='Waiting for microphone permission…';
+   stream=await navigator.mediaDevices.getUserMedia({audio:true});
+   video.muted=true;
+   video.playbackRate=1;
+   await seekVideo(video,clip.start,0.001);
+   const mimeType=['audio/mp4','audio/webm;codecs=opus','audio/webm'].find(type=>MediaRecorder.isTypeSupported(type));
+   recorder=new MediaRecorder(stream,mimeType?{mimeType}:undefined);
+   const chunks=[];
+   const captured=new Promise((resolve,reject)=>{
+    recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data)};
+    recorder.onstop=()=>resolve(chunks);
+    recorder.onerror=event=>reject(event.error||Error('Microphone recording failed'));
+   });
+   captured.catch(()=>{});
+   finish=()=>{
+    if(recorder.state!=='recording')return;
+    recordingDuration=(performance.now()-started)/1000;
+    recorder.stop();
+    video.pause();
+    button.disabled=true;
+   };
+   const checkEnd=()=>{
+    if(recorder.state!=='recording')return;
+    if(video.paused||video.currentTime>=clip.end){finish();return}
+    frame=requestAnimationFrame(checkEnd);
+   };
+   await video.play();
+   recorder.start();
+   started=performance.now();
+   button.textContent='Stop and save voiceover';
+   button.disabled=false;
+   status.textContent='Recording microphone while the selected footage plays.';
+   checkEnd();
+   await captured;
+   if(!chunks.length||!recordingDuration)throw Error('No audio was captured');
+   const type=recorder.mimeType||chunks[0].type;
+   const extension=type.includes('mp4')?'m4a':type.includes('ogg')?'ogg':'webm';
+   const file=new File(chunks,'voiceover.'+extension,{type});
+   stream.getTracks().forEach(track=>track.stop());
+   await voiceover.saveFile(file,recordingDuration);
+   status.textContent='Voiceover saved. Preview or trim it below.';
+  }catch(error){
+   status.textContent='Could not record voiceover: '+error.message+'. You can upload a voiceover below.';
+  }finally{
+   cancelAnimationFrame(frame);
+   if(recorder?.state==='recording')recorder.stop();
+   stream?.getTracks().forEach(track=>track.stop());
+   video.pause();
+   video.muted=muted;
+   video.controls=true;
+   section.inert=voiceover.section.inert=false;
+   video.before(button,status);
+   locked.forEach(control=>control.disabled=false);
+   recordingVoiceover=false;
+   finish=null;
+   button.disabled=false;
+   button.textContent='Record voiceover';
+  }
+ };
 }
 function showQueue(){view('queue');$('queueItems').innerHTML='';projects.forEach(p=>{let missing=names.filter((n,i)=>i!==4&&!p.clips[i]);let s=document.createElement('section');s.textContent='#'+p.number+' '+(p.common||'Unnamed')+': '+(missing.join(', ')||'Ready to render');$('queueItems').append(s)})}
 function showReusable(){view('reusable')}
@@ -274,8 +408,7 @@ async function storeFile(key,file){
  });
 }
 async function loadFile(k){try{db??=await dbOpen();return await new Promise(res=>{let r=db.transaction('clips').objectStore('clips').get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>res(null)})}catch{return null}}
-async function seekVideo(video,target){
- const tolerance=0.12;
+async function seekVideo(video,target,tolerance=0.12){
  if(Math.abs(video.currentTime-target)<=tolerance)return;
  if(video.readyState<1)await new Promise((resolve,reject)=>{video.addEventListener('loadedmetadata',resolve,{once:true});video.addEventListener('error',()=>reject(Error('Video metadata failed')),{once:true})});
  video.currentTime=target;
@@ -334,13 +467,16 @@ async function render(){
    if(!clip)throw Error('Missing required clip: '+names[i]);
    const file=files[project.id+':'+i]||await loadFile(project.id+':'+i);
    if(!file)throw Error('Missing local file: '+clip.name);
-   clips.push({file,clip,name:names[i],speed:i===3?2:1});
-  }
-  if(project.clips.narration){
-   const key=project.id+':narration';
-   const file=files[key]||await loadFile(key);
-   if(!file)throw Error('Missing local iNaturalist narration file');
-   clips[3].narration={file,clip:project.clips.narration};
+   const voiceKey=narrationKey(i);
+   const voiceClip=project.clips[voiceKey];
+   let narration;
+   if(voiceClip){
+    const key=project.id+':'+voiceKey;
+    const voiceFile=files[key]||await loadFile(key);
+    if(!voiceFile)throw Error('Missing voiceover for '+names[i]);
+    narration={file:voiceFile,clip:voiceClip};
+   }
+   clips.push({file,clip,name:names[i],speed:i===3?2:1,narration});
   }
   clips[0].title=await titleImage([
    'Species #'+project.number+':',project.common?.trim(),project.latin?.trim()
@@ -349,7 +485,7 @@ async function render(){
   closing.title=await titleImage(['The world is incredible!','And so are you!'],62,1005);
   closing.tail=1;
   status.textContent='Loading the video encoder…';
-  worker=new Worker('export-worker.js?v=narration1');
+  worker=new Worker('export-worker.js?v=all-voice1');
   const video=await withTimeout(new Promise((resolve,reject)=>{
    worker.onmessage=({data})=>{
     if(data.error)reject(Error(data.error));

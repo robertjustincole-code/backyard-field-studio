@@ -18,7 +18,7 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html' });
   res.end(html);
 });
-const slots = [0, 1, 2, 3, 6, 7];
+const slots = [0, 1, 2, 3, 5, 6];
 const colors = ['red', 'lime', 'blue', 'yellow', 'magenta', 'cyan'];
 const expected = [[255,0,0], [0,255,0], [0,0,255], [255,255,0], [255,0,255], [0,255,255]];
 let context;
@@ -57,15 +57,17 @@ try {
   await speciesNumber.fill('42');
   await speciesNumber.press('Tab');
   assert.match(await page.locator('#heading').innerText(), /^#42 /);
-  const sections = page.locator('#segments section');
+  const pages = page.locator('.clip-page');
+  const tabs = page.locator('#clipTabs button');
 
   for (const [index, slot] of slots.entries()) {
-    const section = sections.nth(slot);
+    await tabs.nth(slot).click();
+    const section = pages.nth(slot).locator('section').first();
     await section.locator('input[type=file]').setInputFiles(clips[index]);
     const video = section.locator('video');
     try {
       await page.waitForFunction(i => {
-        const video = document.querySelectorAll('#segments video')[i];
+        const video = document.querySelectorAll('.clip-page')[i].querySelector('video');
         return video.error || (video.readyState >= 1 && Number.isFinite(video.duration));
       }, slot, { polling: 100, timeout: 10000 });
       assert.equal(await video.evaluate(element => element.error?.message), undefined);
@@ -84,13 +86,39 @@ try {
     await section.locator('.end').press('Tab');
   }
 
-  const narration = sections.nth(4);
+  await tabs.nth(3).click();
+  const narration = pages.nth(3).locator('section').last();
   await narration.locator('input[type=file]').setInputFiles(clips[0]);
   await narration.locator('.start').fill('0.1');
   await narration.locator('.end').fill('1.3');
   await narration.locator('.end').press('Tab');
 
-  const first = sections.nth(0);
+  await tabs.nth(1).click();
+  await page.evaluate(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const audio = new AudioContext();
+      await audio.resume();
+      const tone = audio.createOscillator();
+      const output = audio.createMediaStreamDestination();
+      tone.connect(output);
+      tone.start();
+      window.testAudio = audio;
+      return output.stream;
+    };
+  });
+  await page.getByRole('button', { name: 'Record voiceover' }).click();
+  await page.getByText('Voiceover saved. Preview or trim it below.').waitFor({ timeout: 15000 });
+  await page.evaluate(() => window.testAudio.close());
+  const secondVoice = pages.nth(1).locator('section').last();
+  await secondVoice.getByRole('button', { name: 'Remove narration' }).click();
+  await secondVoice.getByText('Optional, can skip').waitFor();
+  await secondVoice.locator('input[type=file]').setInputFiles(clips[0]);
+  await secondVoice.locator('.start').fill('0.3');
+  await secondVoice.locator('.end').fill('1.3');
+  await secondVoice.locator('.end').press('Tab');
+
+  await tabs.nth(0).click();
+  const first = pages.nth(0).locator('section').first();
   const timeline = first.locator('.timeline');
   const startHandle = first.getByRole('button', { name: /Trim start handle/ });
   const endHandle = first.getByRole('button', { name: /Trim end handle/ });
@@ -124,7 +152,7 @@ try {
   assert.equal(await speciesNumber.inputValue(), '42');
   const trims = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips)
     .map(({ start, end }) => [start, end]));
-  assert.deepEqual(trims, [...slots.map(() => [0.3, 1.3]), [0.1, 1.3]]);
+  assert.deepEqual(trims, [...slots.map(() => [0.3, 1.3]), [0.1, 1.3], [0.3, 1.3]]);
   const status = page.locator('#status');
   await page.getByRole('button', { name: 'Stitch video' }).click();
   try {
@@ -211,11 +239,13 @@ try {
     }
     assert.ok(peak > 500, 'Missing audio in clip ' + (index + 1));
   }
-  let crossings = 0;
-  for (let sample = 28001; sample < 29600; sample++) {
-    if (samples.readInt16LE((sample - 1) * 2) <= 0 && samples.readInt16LE(sample * 2) > 0) crossings++;
+  for (const start of [11200, 28000]) {
+    let crossings = 0;
+    for (let sample = start + 1; sample < start + 1600; sample++) {
+      if (samples.readInt16LE((sample - 1) * 2) <= 0 && samples.readInt16LE(sample * 2) > 0) crossings++;
+    }
+    assert.ok(Math.abs(crossings - 88) <= 3, 'Expected 440 Hz voiceover at sample ' + start + ': ' + crossings);
   }
-  assert.ok(Math.abs(crossings - 88) <= 3, 'Expected 440 Hz narration, not the screen recording audio: ' + crossings);
   console.log('PASS: six saved clips trimmed in order, downloaded and decoded as portrait H.264/AAC MP4');
 } finally {
   await context?.close();
