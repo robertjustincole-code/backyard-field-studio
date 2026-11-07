@@ -263,6 +263,26 @@ async function withTimeout(promise,ms,message){
   return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms)})]);
  }finally{clearTimeout(timer)}
 }
+async function titleImage(lines,size,centerY){
+ const canvas=document.createElement('canvas');
+ canvas.width=720;
+ canvas.height=1280;
+ const ctx=canvas.getContext('2d');
+ ctx.textAlign='center';
+ ctx.textBaseline='middle';
+ ctx.fillStyle='#fff';
+ ctx.shadowColor='rgba(0,0,0,0.45)';
+ ctx.shadowBlur=3;
+ const font=' -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
+ ctx.font='500 '+size+'px'+font;
+ const width=Math.max(...lines.map(line=>ctx.measureText(line).width));
+ size=Math.min(size,size*672/Math.max(1,width));
+ ctx.font='500 '+size+'px'+font;
+ lines.forEach((line,index)=>ctx.fillText(line,360,centerY+(index-(lines.length-1)/2)*size*1.12));
+ const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+ if(!blob)throw Error('Could not create video title');
+ return new Uint8Array(await blob.arrayBuffer());
+}
 async function render(){
  const project=cur(),status=$('status'),progress=$('progress'),download=$('download'),button=$('stitch');
  if(button.disabled)return;
@@ -283,8 +303,14 @@ async function render(){
    if(!file)throw Error('Missing local file: '+clip.name);
    clips.push({file,clip,name:names[i]});
   }
+  clips[0].title=await titleImage([
+   'Species #'+project.number+':',project.common?.trim(),project.latin?.trim()
+  ].filter(Boolean),56,1005);
+  const closing=clips.at(-1);
+  closing.title=await titleImage(['The world is incredible!','And so are you!'],62,1005);
+  closing.tail=1;
   status.textContent='Loading the video encoder…';
-  worker=new Worker('export-worker.js');
+  worker=new Worker('export-worker.js?v=titles1');
   const video=await withTimeout(new Promise((resolve,reject)=>{
    worker.onmessage=({data})=>{
     if(data.error)reject(Error(data.error));

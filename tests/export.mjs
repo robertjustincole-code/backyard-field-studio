@@ -10,7 +10,7 @@ const dir = await mkdtemp(join(tmpdir(), 'bfs-export-'));
 const html = await readFile('index.html');
 const worker = await readFile('export-worker.js');
 const server = createServer((req, res) => {
-  if (req.url === '/export-worker.js') {
+  if (req.url.split('?')[0] === '/export-worker.js') {
     res.writeHead(200, { 'Content-Type': 'text/javascript' });
     res.end(worker);
     return;
@@ -129,7 +129,7 @@ try {
   const preview = page.getByLabel('Finished video preview');
   assert.equal(await preview.count(), 1);
   await page.waitForFunction(() => document.querySelector('#download video').readyState >= 1);
-  assert.ok(await preview.evaluate(video => video.duration > 6 && !video.error));
+  assert.ok(await preview.evaluate(video => video.duration > 7 && !video.error));
   await page.getByRole('button', { name: 'Share or save video' }).click();
   const shared = await page.evaluate(() => window.sharedVideo);
   assert.equal(shared.name, 'species-1.mp4');
@@ -157,7 +157,7 @@ try {
   assert.deepEqual([video.width, video.height], [720, 1280]);
   console.log('MP4 timing:', format.duration, 'seconds', video.avg_frame_rate, 'fps', audio.sample_rate, 'Hz',
     'stream durations:', video.duration, audio.duration);
-  assert.ok(Math.abs(Number(format.duration) - 6) < 0.15, 'Expected six one-second trims: ' + format.duration);
+  assert.ok(Math.abs(Number(format.duration) - 7) < 0.15, 'Expected six one-second trims and one second of closing card: ' + format.duration);
   for (const [index, color] of expected.entries()) {
     const pixel = execFileSync('ffmpeg', [
       '-v', 'error', '-ss', String(index + 0.5), '-i', path,
@@ -167,6 +167,26 @@ try {
     assert.ok(color.every((value, channel) => Math.abs(value - pixel[channel]) < 35),
       'Wrong clip at ' + (index + 0.5) + 's: ' + [...pixel]);
   }
+  function titleFrame(time) {
+    return execFileSync('ffmpeg', [
+      '-v', 'error', '-ss', String(time), '-i', path,
+      '-vf', 'crop=720:240:0:875,format=rgb24', '-frames:v', '1', '-f', 'rawvideo', '-'
+    ]);
+  }
+  function whitePixels(frame) {
+    let count = 0;
+    for (let index = 0; index < frame.length; index += 3) {
+      if (frame[index] > 225 && frame[index + 1] > 225 && frame[index + 2] > 225) count++;
+    }
+    return count;
+  }
+  assert.ok(whitePixels(titleFrame(0.5)) > 1000, 'Missing opening title');
+  assert.equal(whitePixels(titleFrame(1.5)), 0, 'Title leaked into a middle clip');
+  const closing = titleFrame(5.5);
+  const card = titleFrame(6.5);
+  assert.ok(whitePixels(closing) > 1000, 'Missing closing title');
+  assert.ok(whitePixels(card) > 1000, 'Missing black-card title');
+  assert.ok(card.subarray(0, 720 * 20 * 3).every(value => value < 10), 'Card background is not black');
   const samples = execFileSync('ffmpeg', [
     '-v', 'error', '-i', path, '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', '-'
   ]);
