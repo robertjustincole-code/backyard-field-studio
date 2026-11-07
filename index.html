@@ -14,7 +14,7 @@
 .scrub{width:100%;padding:0;accent-color:#245e44}
 .clip-controls:disabled{opacity:.6}
 .timeline{margin-inline:36px}
-</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><div id="projects"></div></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
+</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><div id="projects"></div></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Species number <input id="speciesNumber" type="number" min="1" step="1" inputmode="numeric" onchange="saveSpeciesNumber()"></label><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
 const names=['Species introduction','Mission introduction','Species interaction','iNaturalist identification','Field guide (optional)','Interesting facts','Closing'];let projects=[],active=null,files={},db=null;try{const saved=JSON.parse(localStorage.getItem('bfs_projects')||'[]');projects=Array.isArray(saved)?saved:[]}catch(e){console.warn('Saved projects unavailable',e)}const $=id=>document.getElementById(id);
 function persist(){try{localStorage.setItem('bfs_projects',JSON.stringify(projects))}catch(e){console.warn('Project storage failed',e);$('appWarning').textContent='Warning: project changes cannot be saved in this browser. Keep your original clips.'}}
 function view(id){for(const x of ['home','editor','queue','reusable'])$(x).classList.toggle('hidden',x!==id)}
@@ -23,6 +23,15 @@ function list(){$('projects').innerHTML=projects.length?'':'<section>No species 
 function newProject(){let p={id:crypto.randomUUID(),number:Math.max(0,...projects.map(x=>x.number))+1,common:'',latin:'',notes:'',transcript:'',clips:{}};projects.push(p);persist();openProject(p.id)}
 function cur(){return projects.find(p=>p.id===active)}
 function saveMeta(){let p=cur();if(!p)return;for(const k of ['common','latin','notes'])p[k]=$(k).value;persist();$('heading').textContent='#'+p.number+' '+(p.common||'New species')}
+function saveSpeciesNumber(){
+ const project=cur(),input=$('speciesNumber');
+ const number=input.valueAsNumber;
+ if(Number.isSafeInteger(number)&&number>0){
+  project.number=number;
+  saveMeta();
+ }
+ input.value=project.number;
+}
 let disposeClipEditors=[];
 function clearClipEditors(){
  disposeClipEditors.forEach(dispose=>dispose());
@@ -35,6 +44,7 @@ function openProject(id){
  const project=cur();
  view('editor');
  $('heading').textContent='#'+project.number+' '+(project.common||'New species');
+ $('speciesNumber').value=project.number;
  for(const key of ['common','latin','notes'])$(key).value=project[key]||'';
  names.forEach((name,index)=>openClipEditor(project,name,index));
 }
@@ -75,7 +85,7 @@ function openClipEditor(project,name,index){
  const format=time=>String(Number(time.toFixed(3)));
  const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
  const percent=time=>time/video.duration*100+'%';
- section.querySelector('h3').textContent=(index+1)+'. '+name;
+ section.querySelector('h3').textContent=(index+1)+'. '+name+(index===3?' (2× on export)':'');
  fileState.textContent=clip()?'✓ Saved: '+clip().name:(index===4?'Optional, can skip':'○ Still needs filming');
  $('segments').append(section);
 
@@ -301,7 +311,7 @@ async function render(){
    if(!clip)throw Error('Missing required clip: '+names[i]);
    const file=files[project.id+':'+i]||await loadFile(project.id+':'+i);
    if(!file)throw Error('Missing local file: '+clip.name);
-   clips.push({file,clip,name:names[i]});
+   clips.push({file,clip,name:names[i],speed:i===3?2:1});
   }
   clips[0].title=await titleImage([
    'Species #'+project.number+':',project.common?.trim(),project.latin?.trim()
@@ -310,7 +320,7 @@ async function render(){
   closing.title=await titleImage(['The world is incredible!','And so are you!'],62,1005);
   closing.tail=1;
   status.textContent='Loading the video encoder…';
-  worker=new Worker('export-worker.js?v=titles1');
+  worker=new Worker('export-worker.js?v=speed1');
   const video=await withTimeout(new Promise((resolve,reject)=>{
    worker.onmessage=({data})=>{
     if(data.error)reject(Error(data.error));
