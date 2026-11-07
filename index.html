@@ -33,7 +33,7 @@ async function seekVideo(video,target){
      if(video.error){reject(Error('Video decoding failed'));return}
      if(!video.seeking&&Math.abs(video.currentTime-target)<=tolerance){resolve();return}
      if(Date.now()-started>10000){reject(Error('Video seek timed out at '+target.toFixed(2)+'s'));return}
-     setTimeout(poll,100);
+     setTimeout(poll,30);
    };
    poll();
  });
@@ -43,6 +43,15 @@ async function withTimeout(promise,ms,message){
  try{
   return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms)})]);
  }finally{clearTimeout(timer)}
+}
+function clearPlayer(player){
+ const {video,url}=player;
+ video.onloadeddata=video.onerror=null;
+ video.pause();
+ video.removeAttribute('src');
+ video.load();
+ if(url)URL.revokeObjectURL(url);
+ player.url=null;
 }
 async function render(){
  const p=cur(),status=$('status'),progress=$('progress'),download=$('download'),button=$('stitch');
@@ -59,7 +68,8 @@ async function render(){
  if(download.firstChild)URL.revokeObjectURL(download.firstChild.href);
  download.replaceChildren();
  status.textContent='Preparing export…';
- let audio,destination,stream,recorder,video,objectUrl;
+ let audio,destination,stream,recorder;
+ const players=[];
  try{
   audio=new AudioEngine({sampleRate:48000});
   // Resume while the Stitch button's user gesture is still active.
@@ -80,18 +90,20 @@ async function render(){
   stream=canvas.captureStream(30);
   destination=audio.createMediaStreamDestination();
   stream.addTrack(destination.stream.getAudioTracks()[0]);
-  video=document.createElement('video');
-  video.playsInline=true;
-  video.preload='auto';
-  const source=audio.createMediaElementSource(video);
-  source.connect(destination);
+  for(let i=0;i<2;i++){
+   const video=document.createElement('video');
+   video.playsInline=true;
+   video.preload='auto';
+   audio.createMediaElementSource(video).connect(destination);
+   players.push({video,url:null});
+  }
   recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:4000000,audioBitsPerSecond:128000});
   const recorded=[];
   let recorderError;
   recorder.ondataavailable=event=>{if(event.data.size)recorded.push(event.data)};
   recorder.onerror=event=>{recorderError=event.error||Error('Recorder failed')};
 
-  function draw(){
+  function draw(video){
    const {width,height}=canvas;
    const scale=Math.min(width/video.videoWidth,height/video.videoHeight);
    const w=video.videoWidth*scale,h=video.videoHeight*scale;
@@ -100,22 +112,35 @@ async function render(){
    ctx.drawImage(video,(width-w)/2,(height-h)/2,w,h);
   }
 
-  for(const [index,{file,clip,name}] of items.entries()){
-   status.textContent='Preparing clip '+(index+1)+'/'+items.length+': '+name;
-   objectUrl=URL.createObjectURL(file);
+  async function prepare(index){
+   const {file,clip,name}=items[index];
+   const player=players[index%players.length];
+   const {video}=player;
+   clearPlayer(player);
+   player.url=URL.createObjectURL(file);
    await withTimeout(new Promise((resolve,reject)=>{
     video.onloadeddata=resolve;
     video.onerror=()=>reject(Error('Cannot decode '+name+' ('+file.name+')'));
-    video.src=objectUrl;
+    video.src=player.url;
    }),15000,'Video load timed out: '+name);
    const begin=Math.max(0,clip.start||0),finish=Math.min(video.duration,clip.end||video.duration);
    if(!(finish>begin))throw Error('Invalid trim for '+name);
    await seekVideo(video,begin);
+   return {video,begin,finish,name};
+  }
+
+  let pending=prepare(0);
+  for(let index=0;index<items.length;index++){
+   status.textContent='Preparing clip '+(index+1)+'/'+items.length;
+   const {video,begin,finish,name}=await pending;
    await withTimeout(video.play(),12000,'Playback timed out: '+name);
-   draw();
+   draw(video);
    if(recorderError)throw recorderError;
    if(index===0)recorder.start();
-   else recorder.resume();
+   if(index+1<items.length){
+    pending=prepare(index+1);
+    pending.catch(()=>{});
+   }
    status.textContent='Rendering clip '+(index+1)+'/'+items.length+': '+name;
    await new Promise((resolve,reject)=>{
     const deadline=performance.now()+Math.max(20000,(finish-begin+15)*1000);
@@ -123,17 +148,12 @@ async function render(){
      if(recorderError||video.error){reject(recorderError||Error('Video playback failed: '+name));return}
      if(video.currentTime>=finish||video.ended){resolve();return}
      if(performance.now()>deadline){reject(Error('Rendering timed out: '+name));return}
-     draw();
+     draw(video);
      setTimeout(tick,1000/30);
     };
     tick();
    });
-   if(index<items.length-1)recorder.pause();
    video.pause();
-   video.removeAttribute('src');
-   video.load();
-   URL.revokeObjectURL(objectUrl);
-   objectUrl=null;
    progress.value=Math.round((index+1)/items.length*100);
   }
 
@@ -151,13 +171,7 @@ async function render(){
  }catch(error){
   status.textContent='Render failed: '+error.message;
  }finally{
-  if(video){
-   video.onloadeddata=video.onerror=null;
-   video.pause();
-   video.removeAttribute('src');
-   video.load();
-  }
-  if(objectUrl)URL.revokeObjectURL(objectUrl);
+  players.forEach(clearPlayer);
   if(recorder&&recorder.state!=='inactive')recorder.stop();
   stream?.getTracks().forEach(track=>track.stop());
   destination?.stream.getTracks().forEach(track=>track.stop());
