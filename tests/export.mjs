@@ -29,7 +29,7 @@ try {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   // Playwright WebKit cannot persist File objects in its private contexts.
-  context = await webkit.launchPersistentContext(join(dir, 'profile'), { acceptDownloads: true });
+  context = await webkit.launchPersistentContext(join(dir, 'profile'), { acceptDownloads: true, headless: false });
   const page = context.pages()[0] || await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
