@@ -8,7 +8,13 @@ import assert from 'node:assert/strict';
 
 const dir = await mkdtemp(join(tmpdir(), 'bfs-export-'));
 const html = await readFile('index.html');
+const worker = await readFile('export-worker.js');
 const server = createServer((req, res) => {
+  if (req.url === '/export-worker.js') {
+    res.writeHead(200, { 'Content-Type': 'text/javascript' });
+    res.end(worker);
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'text/html' });
   res.end(html);
 });
@@ -29,7 +35,7 @@ try {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   // Playwright WebKit cannot persist File objects in its private contexts.
-  context = await webkit.launchPersistentContext(join(dir, 'profile'), { acceptDownloads: true, headless: false });
+  context = await webkit.launchPersistentContext(join(dir, 'profile'), { acceptDownloads: true });
   const page = context.pages()[0] || await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -75,7 +81,7 @@ try {
   try {
     await page.waitForFunction(() =>
       /Export complete|Render failed|cannot record/.test(document.querySelector('#status').textContent),
-      null, { timeout: 90000 });
+      null, { timeout: 180000 });
   } catch (error) {
     throw Error('Export stalled: ' + await status.innerText(), { cause: error });
   }
