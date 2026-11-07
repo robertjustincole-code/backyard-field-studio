@@ -26,7 +26,7 @@ self.onmessage = async ({ data: clips }) => {
 
     fs.mkdir('/source');
     const parts = [];
-    for (const [index, { file, clip, name, title, tail = 0 }] of clips.entries()) {
+    for (const [index, { file, clip, name, title, tail = 0, speed = 1 }] of clips.entries()) {
       self.postMessage({ status: 'Encoding clip ' + (index + 1) + '/' + clips.length + ': ' + name, index });
       const input = '/source/clip';
       const output = 'part-' + index + '.mp4';
@@ -51,7 +51,7 @@ self.onmessage = async ({ data: clips }) => {
         if (title) fs.writeFile(titlePath, title);
         const videoFilters = [
           'scale=720:1280:force_original_aspect_ratio=decrease:force_divisible_by=2',
-          'pad=720:1280:(ow-iw)/2:(oh-ih)/2', 'setsar=1', 'fps=30'
+          'pad=720:1280:(ow-iw)/2:(oh-ih)/2', 'setsar=1', 'setpts=PTS/' + speed, 'fps=30'
         ];
         if (tail) videoFilters.push('trim=duration=' + duration, 'tpad=stop_mode=add:stop_duration=' + tail + ':color=black');
         const titleInput = audio ? 1 : 2;
@@ -62,8 +62,8 @@ self.onmessage = async ({ data: clips }) => {
             '-filter_complex', '[0:v]' + videoFilters.join(',') + '[base];[base][' + titleInput + ':v]overlay[v]',
             '-map', '[v]'] : ['-vf', videoFilters.join(','), '-map', '0:v:0']),
           '-map', audio ? '0:a:0' : '1:a:0',
-          '-t', String(duration + tail),
-          '-af', 'aresample=48000:async=1:first_pts=0,atrim=duration=' + duration + ',apad',
+          '-t', String(duration / speed + tail),
+          '-af', 'aresample=48000:async=1:first_pts=0,atrim=duration=' + duration + (speed === 2 ? ',atempo=2' : '') + ',apad',
           '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '21', '-maxrate', '20M', '-bufsize', '20M',
           '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
           '-threads', '1', output

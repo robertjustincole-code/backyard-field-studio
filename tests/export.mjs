@@ -53,6 +53,10 @@ try {
   });
   await page.goto('http://127.0.0.1:' + server.address().port);
   await page.getByRole('button', { name: '+ New species' }).click();
+  const speciesNumber = page.getByLabel('Species number');
+  await speciesNumber.fill('42');
+  await speciesNumber.press('Tab');
+  assert.match(await page.locator('#heading').innerText(), /^#42 /);
   const sections = page.locator('#segments section');
 
   for (const [index, slot] of slots.entries()) {
@@ -111,6 +115,7 @@ try {
   await page.getByRole('button', { name: 'Open project' }).click();
   await page.waitForFunction(() => document.querySelector('#segments .start').value === '0.3',
     null, { polling: 100, timeout: 10000 });
+  assert.equal(await speciesNumber.inputValue(), '42');
   const trims = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips)
     .map(({ start, end }) => [start, end]));
   assert.deepEqual(trims, slots.map(() => [0.3, 1.3]));
@@ -129,10 +134,10 @@ try {
   const preview = page.getByLabel('Finished video preview');
   assert.equal(await preview.count(), 1);
   await page.waitForFunction(() => document.querySelector('#download video').readyState >= 1);
-  assert.ok(await preview.evaluate(video => video.duration > 7 && !video.error));
+  assert.ok(await preview.evaluate(video => video.duration > 6.45 && !video.error));
   await page.getByRole('button', { name: 'Share or save video' }).click();
   const shared = await page.evaluate(() => window.sharedVideo);
-  assert.equal(shared.name, 'species-1.mp4');
+  assert.equal(shared.name, 'species-42.mp4');
   assert.equal(shared.type, 'video/mp4');
   assert.equal(shared.active, true);
   assert.ok(shared.size > 0);
@@ -141,7 +146,7 @@ try {
     page.waitForEvent('download'),
     page.getByRole('link', { name: /Download finished video/ }).click()
   ]);
-  assert.equal(download.suggestedFilename(), 'species-1.mp4');
+  assert.equal(download.suggestedFilename(), 'species-42.mp4');
   const path = await download.path();
   assert.equal((await stat(path)).size, shared.size);
   const { streams, format } = JSON.parse(execFileSync('ffprobe', [
@@ -157,15 +162,16 @@ try {
   assert.deepEqual([video.width, video.height], [720, 1280]);
   console.log('MP4 timing:', format.duration, 'seconds', video.avg_frame_rate, 'fps', audio.sample_rate, 'Hz',
     'stream durations:', video.duration, audio.duration);
-  assert.ok(Math.abs(Number(format.duration) - 7) < 0.15, 'Expected six one-second trims and one second of closing card: ' + format.duration);
+  assert.ok(Math.abs(Number(format.duration) - 6.5) < 0.15, 'Expected five one-second trims, a half-second iNaturalist clip and one second of closing card: ' + format.duration);
+  const clipMidpoints = [0.5, 1.5, 2.5, 3.25, 4, 5];
   for (const [index, color] of expected.entries()) {
     const pixel = execFileSync('ffmpeg', [
-      '-v', 'error', '-ss', String(index + 0.5), '-i', path,
+      '-v', 'error', '-ss', String(clipMidpoints[index]), '-i', path,
       '-vf', 'scale=1:1,format=rgb24', '-frames:v', '1', '-f', 'rawvideo', '-'
     ]);
     assert.equal(pixel.length, 3);
     assert.ok(color.every((value, channel) => Math.abs(value - pixel[channel]) < 35),
-      'Wrong clip at ' + (index + 0.5) + 's: ' + [...pixel]);
+      'Wrong clip at ' + (clipMidpoints[index]) + 's: ' + [...pixel]);
   }
   function titleFrame(time) {
     return execFileSync('ffmpeg', [
@@ -182,8 +188,8 @@ try {
   }
   assert.ok(whitePixels(titleFrame(0.5)) > 1000, 'Missing opening title');
   assert.equal(whitePixels(titleFrame(1.5)), 0, 'Title leaked into a middle clip');
-  const closing = titleFrame(5.5);
-  const card = titleFrame(6.5);
+  const closing = titleFrame(5);
+  const card = titleFrame(6);
   assert.ok(whitePixels(closing) > 1000, 'Missing closing title');
   assert.ok(whitePixels(card) > 1000, 'Missing black-card title');
   assert.ok(card.subarray(0, 720 * 20 * 3).every(value => value < 10), 'Card background is not black');
@@ -191,8 +197,8 @@ try {
     '-v', 'error', '-i', path, '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', '-'
   ]);
   for (const index of slots.keys()) {
-    const start = (index * 8000 + 2400) * 2;
-    const end = start + 3200 * 2;
+    const start = Math.round((clipMidpoints[index] - 0.12) * 16000);
+    const end = start + 3840;
     let peak = 0;
     for (let offset = start; offset < Math.min(end, samples.length - 1); offset += 2) {
       peak = Math.max(peak, Math.abs(samples.readInt16LE(offset)));
