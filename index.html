@@ -14,19 +14,89 @@
 .scrub{width:100%;padding:0;accent-color:#245e44}
 .clip-controls:disabled{opacity:.6}
 .timeline{margin-inline:36px}
-.clip-tabs{display:flex;gap:4px;overflow-x:auto;padding:4px 0;position:sticky;top:0;z-index:2;background:#f5f7f1}.clip-tabs button{flex:none;margin:0}.clip-tabs button[aria-current=true]{background:#193d30;color:white}.clip-tabs button:disabled{opacity:.55}</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><div id="projects"></div></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Species number <input id="speciesNumber" type="number" min="1" step="1" inputmode="numeric" onchange="saveSpeciesNumber()"></label><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><nav id="clipTabs" class="clip-tabs" aria-label="Clip pages"></nav><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
+.clip-tabs{display:flex;gap:4px;overflow-x:auto;padding:4px 0;position:sticky;top:0;z-index:2;background:#f5f7f1}.clip-tabs button{flex:none;margin:0}.clip-tabs button[aria-current=true]{background:#193d30;color:white}.clip-tabs button:disabled{opacity:.55}</style><header><h2>🌿 Backyard Field Studio</h2><div>Species catalog · Film queue · Video editor</div></header><main><p id="appWarning" role="alert" style="color:#a33"></p><div id="home"><button onclick="newProject()">+ New species</button><button class="muted" onclick="showQueue()">Filming queue</button><button class="muted" onclick="showReusable()">Reusable clips</button><h2>Project dashboard</h2><p id="projectCount"></p><section id="nextAction"></section><div id="projects"></div><details id="archive"><summary id="archiveCount"></summary><div id="archivedProjects"></div></details></div><div id="editor" class="hidden"><button class="muted" onclick="back()">← Projects</button><section><h2 id="heading"></h2><label>Species number <input id="speciesNumber" type="number" min="1" step="1" inputmode="numeric" onchange="saveSpeciesNumber()"></label><label>Common name <input id="common" oninput="saveMeta()"></label><label>Scientific name <input id="latin" oninput="saveMeta()"></label><label>Field notes <textarea id="notes" oninput="saveMeta()"></textarea></label></section><nav id="clipTabs" class="clip-tabs" aria-label="Clip pages"></nav><div id="segments"></div><section><h3>Stitch & download</h3><p>Combines your trimmed clips in order. Download the video, then add captions in Instagram. Keep this page open while the video encodes.</p><button id="stitch" onclick="render()">Stitch video</button><progress id="progress" value="0" max="100"></progress><p id="status"></p><div id="download"></div><label><input type="checkbox" id="posted" onchange="setArchived(cur(),this.checked)"> Posted to Instagram · Archive project</label></section></div><div id="queue" class="hidden"><button onclick="back()">← Projects</button><h2>Filming queue</h2><div id="queueItems"></div></div><div id="reusable" class="hidden"><button onclick="back()">← Projects</button><h2>Reusable clips</h2><p>Use the mission and closing clip selectors inside a species project. Select the same file for multiple species.</p></div></main><script>
 const names=['Species introduction','Mission introduction','Species interaction','iNaturalist identification','Field guide (optional)','Interesting facts','Closing'];let projects=[],active=null,files={},db=null;try{const saved=JSON.parse(localStorage.getItem('bfs_projects')||'[]');projects=Array.isArray(saved)?saved:[]}catch(e){console.warn('Saved projects unavailable',e)}const $=id=>document.getElementById(id);
 function persist(){try{localStorage.setItem('bfs_projects',JSON.stringify(projects))}catch(e){console.warn('Project storage failed',e);$('appWarning').textContent='Warning: project changes cannot be saved in this browser. Keep your original clips.'}}
 function view(id){for(const x of ['home','editor','queue','reusable'])$(x).classList.toggle('hidden',x!==id)}
 function back(){if(recordingVoiceover)return;clearClipEditors();view('home');list()}
-function list(){$('projects').innerHTML=projects.length?'':'<section>No species yet. Create your first project.</section>';projects.forEach(p=>{let d=document.createElement('section');let count=names.filter((n,i)=>i!==4&&p.clips?.[i]).length;d.innerHTML='<h3></h3><p></p><button>Open project</button>';d.querySelector('h3').textContent='#'+p.number+' '+(p.common||'Unnamed species');d.querySelector('p').textContent=count+'/6 required clips attached · '+Math.round(count/6*100)+'% complete';d.querySelector('button').onclick=()=>openProject(p.id);$('projects').append(d)})}
+const projectLabel=project=>'#'+project.number+' '+(project.common||'Unnamed species');
+const activeProjects=()=>projects.filter(project=>!project.archived);
+const clipIndexes=project=>names.map((_,index)=>index).filter(index=>index!==4||project.clips[index]);
+const clipDone=(project,index)=>Boolean(project.clips[index]&&project.done?.[index]);
+
+function setArchived(project,archived){
+ project.archived=archived;
+ persist();
+ back();
+}
+function list(){
+ const current=activeProjects();
+ const archived=projects.filter(project=>project.archived);
+ $('projectCount').textContent=current.length+' active '+(current.length===1?'project':'projects');
+ $('archiveCount').textContent='Archive ('+archived.length+')';
+ $('archive').hidden=!archived.length;
+ $('projects').replaceChildren();
+ $('archivedProjects').replaceChildren();
+ for(const project of [...current,...archived]){
+  const card=document.createElement('section');
+  const title=document.createElement('h3');
+  title.textContent=projectLabel(project);
+  const open=document.createElement('button');
+  open.textContent='Open project';
+  open.onclick=()=>openProject(project.id);
+  card.append(title);
+  if(project.archived){
+   const restore=document.createElement('button');
+   restore.className='muted';
+   restore.textContent='Restore project';
+   restore.onclick=()=>setArchived(project,false);
+   card.append(open,restore);
+   $('archivedProjects').append(card);
+  }else{
+   const indexes=clipIndexes(project);
+   const complete=indexes.filter(index=>clipDone(project,index)).length;
+   const progress=document.createElement('progress');
+   progress.max=indexes.length;
+   progress.value=complete;
+   progress.setAttribute('aria-label','Clip completion for '+projectLabel(project));
+   const status=document.createElement('p');
+   status.textContent=complete+'/'+indexes.length+' clips complete · '+Math.round(complete/indexes.length*100)+'%';
+   card.append(status,progress,open);
+   $('projects').append(card);
+  }
+ }
+ const next=$('nextAction');
+ next.replaceChildren();
+ const title=document.createElement('h3');
+ title.textContent='Next step';
+ const description=document.createElement('p');
+ next.append(title,description);
+ const project=current[0];
+ if(!project){
+  description.textContent='Start a new species project.';
+  return;
+ }
+ const index=clipIndexes(project).find(index=>!clipDone(project,index));
+ if(index!==undefined){
+  description.textContent=(project.clips[index]?'Review and check off ':'Record ')+names[index]+' for '+projectLabel(project)+'.';
+ }else{
+  description.textContent=project.exported
+   ? 'Post '+projectLabel(project)+' to Instagram, then archive it.'
+   : 'Stitch and save the finished video for '+projectLabel(project)+'.';
+ }
+ const go=document.createElement('button');
+ go.textContent='Go to next step';
+ go.onclick=()=>openProject(project.id,index);
+ next.append(go);
+}
 function newProject(){let p={id:crypto.randomUUID(),number:Math.max(0,...projects.map(x=>x.number))+1,common:'',latin:'',notes:'',transcript:'',clips:{}};projects.push(p);persist();openProject(p.id)}
 function cur(){return projects.find(p=>p.id===active)}
-function saveMeta(){let p=cur();if(!p)return;for(const k of ['common','latin','notes'])p[k]=$(k).value;persist();$('heading').textContent='#'+p.number+' '+(p.common||'New species')}
+function saveMeta(){let p=cur();if(!p)return;if(p.common!==$('common').value||p.latin!==$('latin').value)delete p.exported;for(const k of ['common','latin','notes'])p[k]=$(k).value;persist();$('heading').textContent='#'+p.number+' '+(p.common||'New species')}
 function saveSpeciesNumber(){
  const project=cur(),input=$('speciesNumber');
  const number=input.valueAsNumber;
  if(Number.isSafeInteger(number)&&number>0){
+  if(project.number!==number)delete project.exported;
   project.number=number;
   saveMeta();
  }
@@ -40,13 +110,14 @@ function clearClipEditors(){
  $('segments').replaceChildren();
  $('clipTabs').replaceChildren();
 }
-function openProject(id){
+function openProject(id,nextIndex){
  clearClipEditors();
  active=id;
  const project=cur();
  view('editor');
  $('heading').textContent='#'+project.number+' '+(project.common||'New species');
  $('speciesNumber').value=project.number;
+ $('posted').checked=Boolean(project.archived);
  for(const key of ['common','latin','notes'])$(key).value=project[key]||'';
  const pages=[],tabs=[];
  const selectPage=index=>{
@@ -64,16 +135,37 @@ function openProject(id){
   const footage=openClipEditor(project,name,index,page);
   const voiceover=openClipEditor(project,'Voiceover (optional)',narrationKey(index),page,true);
   addVoiceRecorder(project,index,footage,voiceover);
+  const label=document.createElement('label');
+  const complete=document.createElement('input');
+  complete.type='checkbox';
+  label.append(complete,' Clip complete');
+  page.append(label);
+  const refresh=()=>{
+   complete.disabled=!project.clips[index]||recordingVoiceover;
+   complete.checked=clipDone(project,index);
+   tab.textContent='Clip '+(index+1)+' · '+name+(complete.checked?' ✓':'');
+  };
+  page.addEventListener('clip-edited',()=>{
+   if(project.done)delete project.done[index];
+   delete project.exported;
+   refresh();
+  });
+  complete.onchange=()=>{
+   (project.done??={})[index]=complete.checked;
+   persist();
+   refresh();
+  };
   const tab=document.createElement('button');
   tab.type='button';
   tab.className='muted';
-  tab.textContent='Clip '+(index+1)+' · '+name;
+  refresh();
   tab.onclick=()=>selectPage(index);
   $('clipTabs').append(tab);
   pages.push(page);
   tabs.push(tab);
  });
- selectPage(0);
+ selectPage(nextIndex??0);
+ if(arguments.length>1) (nextIndex===undefined?$('stitch'):$('clipTabs')).scrollIntoView({block:'start'});
 }
 
 function openClipEditor(project,name,index,page,isNarration=false){
@@ -157,11 +249,13 @@ function openClipEditor(project,name,index,page,isNarration=false){
   if(!Number.isFinite(time)){drawTrim();return}
   const gap=Math.min(0.01,mediaDuration());
   const rounded=Math.round(time*1000)/1000;
+  const previous=selection[edge];
   selection[edge]=edge==='start'
    ? clamp(rounded,0,Math.max(0,selection.end-gap))
    : clamp(rounded,Math.min(mediaDuration(),selection.start+gap),mediaDuration());
   drawTrim();
   scrubTo(selection[edge]);
+  if(selection[edge]!==previous)page.dispatchEvent(new Event('clip-edited'));
   persist();
  }
  function load(file){
@@ -251,6 +345,7 @@ function openClipEditor(project,name,index,page,isNarration=false){
    await storeFile(key,file);
    files[key]=file;
    project.clips[index]={name:file.name,start:0,end:0,recordedDuration};
+   page.dispatchEvent(new Event('clip-edited'));
    persist();
    if(!disposed){load(file);fileState.textContent='Saved: '+file.name;remove.hidden=!isNarration}
   }finally{input.disabled=remove.disabled=false}
@@ -269,6 +364,7 @@ function openClipEditor(project,name,index,page,isNarration=false){
    await storeFile(key,null);
    delete project.clips[index];
    delete files[key];
+   page.dispatchEvent(new Event('clip-edited'));
    persist();
    if(!disposed){
     stopSelection();
@@ -323,7 +419,7 @@ function addVoiceRecorder(project,index,footage,voiceover){
    return;
   }
   recordingVoiceover=true;
-  const locked=[...$('clipTabs').children,$('stitch')];
+  const locked=[...$('clipTabs').children,$('stitch'),$('posted')];
   locked.forEach(control=>control.disabled=true);
   button.disabled=true;
   const muted=video.muted;
@@ -331,6 +427,8 @@ function addVoiceRecorder(project,index,footage,voiceover){
   try{
    // Keep the Stop control outside the inert editing area.
    section.before(button,status);
+   const complete=section.parentElement.querySelector('input[type=checkbox]');
+   complete.disabled=true;
    section.inert=voiceover.section.inert=true;
    video.controls=false;
    video.pause();
@@ -387,6 +485,7 @@ function addVoiceRecorder(project,index,footage,voiceover){
    section.inert=voiceover.section.inert=false;
    video.before(button,status);
    locked.forEach(control=>control.disabled=false);
+   section.parentElement.querySelector('input[type=checkbox]').disabled=false;
    recordingVoiceover=false;
    finish=null;
    button.disabled=false;
@@ -394,7 +493,7 @@ function addVoiceRecorder(project,index,footage,voiceover){
   }
  };
 }
-function showQueue(){view('queue');$('queueItems').innerHTML='';projects.forEach(p=>{let missing=names.filter((n,i)=>i!==4&&!p.clips[i]);let s=document.createElement('section');s.textContent='#'+p.number+' '+(p.common||'Unnamed')+': '+(missing.join(', ')||'Ready to render');$('queueItems').append(s)})}
+function showQueue(){view('queue');$('queueItems').innerHTML='';activeProjects().forEach(p=>{let missing=names.filter((n,i)=>i!==4&&!p.clips[i]);let s=document.createElement('section');s.textContent='#'+p.number+' '+(p.common||'Unnamed')+': '+(missing.join(', ')||'Ready to render');$('queueItems').append(s)})}
 function showReusable(){view('reusable')}
 function copyTranscript(){navigator.clipboard.writeText($('transcript').value).then(()=>alert('Copied'))}
 function dbOpen(){return new Promise((res,rej)=>{let r=indexedDB.open('bfs_media',1);r.onupgradeneeded=()=>r.result.createObjectStore('clips');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
@@ -460,6 +559,7 @@ async function render(){
  status.textContent='Preparing export…';
  let worker;
  try{
+  const snapshot=JSON.stringify(project);
   const clips=[];
   for(let i=0;i<names.length;i++){
    const clip=project.clips[i];
@@ -499,6 +599,7 @@ async function render(){
    worker.postMessage(clips);
   }),15*60*1000,'Export timed out');
   if(!video.byteLength)throw Error('Export was empty');
+  if(snapshot===JSON.stringify(project)){project.exported=true;persist()}
   const file=new File([video],'species-'+project.number+'.mp4',{type:'video/mp4'});
   const url=URL.createObjectURL(file);
   const preview=document.createElement('video');
