@@ -1,6 +1,6 @@
 import { webkit } from 'playwright';
 import { execFileSync } from 'node:child_process';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -40,6 +40,17 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => console.log('browser:', message.type(), message.text()));
+  // The OS share sheet needs a real device. Verify the browser hands it the MP4.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'canShare', { value: ({ files }) => files?.length === 1 });
+    Object.defineProperty(navigator, 'share', { value: async ({ files }) => {
+      const [file] = files;
+      window.sharedVideo = {
+        name: file.name, type: file.type, size: file.size,
+        active: navigator.userActivation.isActive
+      };
+    } });
+  });
   await page.goto('http://127.0.0.1:' + server.address().port);
   await page.getByRole('button', { name: '+ New species' }).click();
   const sections = page.locator('#segments section');
@@ -88,12 +99,24 @@ try {
   assert.match(await status.innerText(), /Export complete/);
   assert.deepEqual(errors, []);
 
+  const preview = page.getByLabel('Finished video preview');
+  assert.equal(await preview.count(), 1);
+  await page.waitForFunction(() => document.querySelector('#download video').readyState >= 1);
+  assert.ok(await preview.evaluate(video => video.duration > 6 && !video.error));
+  await page.getByRole('button', { name: 'Share or save video' }).click();
+  const shared = await page.evaluate(() => window.sharedVideo);
+  assert.equal(shared.name, 'species-1.mp4');
+  assert.equal(shared.type, 'video/mp4');
+  assert.equal(shared.active, true);
+  assert.ok(shared.size > 0);
+
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByRole('link', { name: /Download finished video/ }).click()
   ]);
   assert.equal(download.suggestedFilename(), 'species-1.mp4');
   const path = await download.path();
+  assert.equal((await stat(path)).size, shared.size);
   const { streams, format } = JSON.parse(execFileSync('ffprobe', [
     '-v', 'error', '-show_streams', '-show_format', '-of', 'json', path
   ], { encoding: 'utf8' }));
