@@ -18,7 +18,7 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html' });
   res.end(html);
 });
-const slots = [0, 1, 2, 3, 5, 6];
+const slots = [0, 1, 2, 3, 6, 7];
 const colors = ['red', 'lime', 'blue', 'yellow', 'magenta', 'cyan'];
 const expected = [[255,0,0], [0,255,0], [0,0,255], [255,255,0], [255,0,255], [0,255,255]];
 let context;
@@ -84,6 +84,12 @@ try {
     await section.locator('.end').press('Tab');
   }
 
+  const narration = sections.nth(4);
+  await narration.locator('input[type=file]').setInputFiles(clips[0]);
+  await narration.locator('.start').fill('0.1');
+  await narration.locator('.end').fill('1.3');
+  await narration.locator('.end').press('Tab');
+
   const first = sections.nth(0);
   const timeline = first.locator('.timeline');
   const startHandle = first.getByRole('button', { name: /Trim start handle/ });
@@ -118,7 +124,7 @@ try {
   assert.equal(await speciesNumber.inputValue(), '42');
   const trims = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips)
     .map(({ start, end }) => [start, end]));
-  assert.deepEqual(trims, slots.map(() => [0.3, 1.3]));
+  assert.deepEqual(trims, [...slots.map(() => [0.3, 1.3]), [0.1, 1.3]]);
   const status = page.locator('#status');
   await page.getByRole('button', { name: 'Stitch video' }).click();
   try {
@@ -134,7 +140,7 @@ try {
   const preview = page.getByLabel('Finished video preview');
   assert.equal(await preview.count(), 1);
   await page.waitForFunction(() => document.querySelector('#download video').readyState >= 1);
-  assert.ok(await preview.evaluate(video => video.duration > 6.45 && !video.error));
+  assert.ok(await preview.evaluate(video => video.duration > 7.15 && !video.error));
   await page.getByRole('button', { name: 'Share or save video' }).click();
   const shared = await page.evaluate(() => window.sharedVideo);
   assert.equal(shared.name, 'species-42.mp4');
@@ -162,8 +168,8 @@ try {
   assert.deepEqual([video.width, video.height], [720, 1280]);
   console.log('MP4 timing:', format.duration, 'seconds', video.avg_frame_rate, 'fps', audio.sample_rate, 'Hz',
     'stream durations:', video.duration, audio.duration);
-  assert.ok(Math.abs(Number(format.duration) - 6.5) < 0.15, 'Expected five one-second trims, a half-second iNaturalist clip and one second of closing card: ' + format.duration);
-  const clipMidpoints = [0.5, 1.5, 2.5, 3.25, 4, 5];
+  assert.ok(Math.abs(Number(format.duration) - 7.2) < 0.15, 'Expected five one-second trims, a 1.2-second narrated iNaturalist clip and one second of closing card: ' + format.duration);
+  const clipMidpoints = [0.5, 1.5, 2.5, 3.6, 4.7, 5.7];
   for (const [index, color] of expected.entries()) {
     const pixel = execFileSync('ffmpeg', [
       '-v', 'error', '-ss', String(clipMidpoints[index]), '-i', path,
@@ -188,8 +194,8 @@ try {
   }
   assert.ok(whitePixels(titleFrame(0.5)) > 1000, 'Missing opening title');
   assert.equal(whitePixels(titleFrame(1.5)), 0, 'Title leaked into a middle clip');
-  const closing = titleFrame(5);
-  const card = titleFrame(6);
+  const closing = titleFrame(5.7);
+  const card = titleFrame(6.7);
   assert.ok(whitePixels(closing) > 1000, 'Missing closing title');
   assert.ok(whitePixels(card) > 1000, 'Missing black-card title');
   assert.ok(card.subarray(0, 720 * 20 * 3).every(value => value < 10), 'Card background is not black');
@@ -205,6 +211,11 @@ try {
     }
     assert.ok(peak > 500, 'Missing audio in clip ' + (index + 1));
   }
+  let crossings = 0;
+  for (let sample = 28001; sample < 29600; sample++) {
+    if (samples.readInt16LE((sample - 1) * 2) <= 0 && samples.readInt16LE(sample * 2) > 0) crossings++;
+  }
+  assert.ok(Math.abs(crossings - 88) <= 3, 'Expected 440 Hz narration, not the screen recording audio: ' + crossings);
   console.log('PASS: six saved clips trimmed in order, downloaded and decoded as portrait H.264/AAC MP4');
 } finally {
   await context?.close();
