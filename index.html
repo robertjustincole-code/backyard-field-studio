@@ -30,7 +30,75 @@ async function seekVideo(video,target){
    poll();
  });
 }
-async function render(){let p=cur(),items=[];for(let i=0;i<7;i++){let c=p.clips[i];if(!c){if(i!==4){$('status').textContent='Missing required clip: '+names[i];return}continue}let f=files[p.id+':'+i]||await loadFile(p.id+':'+i);if(!f){$('status').textContent='Missing local file: '+c.name;return}items.push({f,c})}$('download').replaceChildren();$('status').textContent='Preparing video…';$('progress').value=0;if(!window.MediaRecorder){$('status').textContent='Video rendering unsupported in this browser';return}let canvas=document.createElement('canvas');canvas.width=540;canvas.height=960;let ctx=canvas.getContext('2d'),stream=canvas.captureStream(30),audio=new AudioContext(),destination=audio.createMediaStreamDestination();for(let t of destination.stream.getAudioTracks())stream.addTrack(t);let mime=['video/mp4','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t));if(!mime){$('status').textContent='No supported video export format';return}let recorder=new MediaRecorder(stream,{mimeType:mime}),chunks=[],elapsed=0;recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.onstop=()=>{let blob=new Blob(chunks,{type:mime}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='species-'+p.number+(mime.includes('mp4')?'.mp4':'.webm');a.textContent='Download finished video';a.style.display='block';$('download').replaceChildren(a);$('status').textContent='Rendered. Download your video.'};recorder.start();try{for(let j=0;j<items.length;j++){let {f,c}=items[j],v=document.createElement('video');v.src=URL.createObjectURL(f);v.playsInline=true;v.muted=false;await new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej});let src=audio.createMediaElementSource(v);src.connect(destination);let begin=Math.max(0,c.start||0),finish=Math.min(v.duration,c.end||v.duration);if(finish<=begin)throw Error('Invalid trim range');await seekVideo(v,begin);await v.play();await new Promise(res=>{let frame=()=>{if(v.currentTime>=finish||v.ended){v.pause();res();return}ctx.fillStyle='black';ctx.fillRect(0,0,540,960);let scale=Math.min(540/v.videoWidth,960/v.videoHeight),w=v.videoWidth*scale,h=v.videoHeight*scale;ctx.drawImage(v,(540-w)/2,(960-h)/2,w,h);requestAnimationFrame(frame)};frame()});elapsed+=finish-begin;URL.revokeObjectURL(v.src);$('progress').value=Math.round((j+1)/items.length*100);$('status').textContent='Processing '+(j+1)+'/'+items.length}recorder.stop()}catch(e){recorder.onstop=null;recorder.stop();$('status').textContent='Render failed: '+e.message}}
+async function render(){
+ const p=cur(),items=[],status=$('status'),progress=$('progress'),download=$('download');
+ for(let i=0;i<7;i++){
+  const c=p.clips[i];if(!c){if(i!==4){status.textContent='Missing required clip: '+names[i];return}continue}
+  const f=files[p.id+':'+i]||await loadFile(p.id+':'+i);
+  if(!f){status.textContent='Missing local file: '+c.name;return}
+  items.push({f,c});
+ }
+ download.replaceChildren();progress.value=0;
+ if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream){status.textContent='This browser cannot export video. Try Chrome or Safari on a Mac.';return}
+ const canvas=document.createElement('canvas');canvas.width=540;canvas.height=960;
+ const ctx=canvas.getContext('2d');if(!ctx){status.textContent='Canvas unavailable';return}
+ const mime=['video/mp4','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t));
+ if(!mime){status.textContent='No supported recording format on this device';return}
+ const audio=new (window.AudioContext||window.webkitAudioContext)();
+ const destination=audio.createMediaStreamDestination(),stream=canvas.captureStream(30);
+ destination.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
+ let recorder,video=null,objectUrl=null,recorded=[],completed=false;
+ try{
+  recorder=new MediaRecorder(stream,{mimeType:mime});
+  recorder.ondataavailable=e=>{if(e.data.size)recorded.push(e.data)};
+  recorder.onerror=e=>{status.textContent='Recorder error: '+(e.error?.message||'Unknown error')};
+  await Promise.race([audio.resume(),new Promise((_,reject)=>setTimeout(()=>reject(Error('Audio engine timed out')),10000))]);
+  ctx.fillStyle='black';ctx.fillRect(0,0,540,960);
+  recorder.start(1000);
+  for(let j=0;j<items.length;j++){
+   const {f,c}=items[j];status.textContent='Preparing clip '+(j+1)+'/'+items.length;
+   objectUrl=URL.createObjectURL(f);video=document.createElement('video');
+   video.src=objectUrl;video.playsInline=true;video.preload='auto';
+   await Promise.race([new Promise((resolve,reject)=>{video.onloadedmetadata=resolve;video.onerror=()=>reject(Error('Cannot load '+f.name));video.load()}),new Promise((_,reject)=>setTimeout(()=>reject(Error('Video load timed out: '+f.name)),15000))]);
+   const begin=Math.max(0,c.start||0),finish=Math.min(video.duration,c.end||video.duration);
+   if(!(finish>begin))throw Error('Invalid trim for '+f.name);
+   await seekVideo(video,begin);
+   const source=audio.createMediaElementSource(video);source.connect(destination);
+   status.textContent='Rendering clip '+(j+1)+'/'+items.length;
+   await Promise.race([video.play(),new Promise((_,reject)=>setTimeout(()=>reject(Error('Playback timed out: '+f.name)),12000))]);
+   await new Promise((resolve,reject)=>{
+    const startTime=Date.now(),maxMs=Math.max(20000,(finish-begin+15)*1000);
+    const tick=()=>{
+     if(video.error){reject(Error('Video playback failed: '+f.name));return}
+     if(video.currentTime>=finish||video.ended){video.pause();resolve();return}
+     if(Date.now()-startTime>maxMs){reject(Error('Rendering timed out: '+f.name));return}
+     ctx.fillStyle='black';ctx.fillRect(0,0,540,960);
+     if(video.videoWidth&&video.videoHeight){const scale=Math.min(540/video.videoWidth,960/video.videoHeight),w=video.videoWidth*scale,h=video.videoHeight*scale;ctx.drawImage(video,(540-w)/2,(960-h)/2,w,h)}
+     setTimeout(tick,33);
+    };tick();
+   });
+   video.pause();video.removeAttribute('src');video.load();video=null;
+   URL.revokeObjectURL(objectUrl);objectUrl=null;
+   progress.value=Math.round((j+1)/items.length*100);
+  }
+  await new Promise((resolve,reject)=>{recorder.onstop=resolve;recorder.onerror=e=>reject(e.error||Error('Recorder failed'));recorder.stop();setTimeout(()=>reject(Error('Finalizing video timed out')),15000)});
+  const blob=new Blob(recorded,{type:mime});
+  if(!blob.size)throw Error('Export was empty');
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download='species-'+p.number+(mime.includes('mp4')?'.mp4':'.webm');
+  link.textContent='Download finished video ('+(blob.size/1048576).toFixed(1)+' MB)';
+  link.style.display='block';download.replaceChildren(link);
+  status.textContent='Export complete. Tap the download link. Format: '+(mime.includes('mp4')?'MP4':'WebM');
+  completed=true;
+ }catch(e){status.textContent='Render failed: '+e.message}
+ finally{
+  if(video){video.pause();video.removeAttribute('src')}
+  if(objectUrl)URL.revokeObjectURL(objectUrl);
+  if(recorder&&recorder.state!=='inactive'){recorder.onstop=null;recorder.stop()}
+  stream.getTracks().forEach(t=>t.stop());
+  await audio.close().catch(()=>{});
+ }
+}
 
-try{list();$('appWarning').textContent='Field Studio · stable clip workflow v1'}catch(e){$('appWarning').textContent='Startup error: '+e.message}
+try{list();$('appWarning').textContent='Field Studio · export build 2'}catch(e){$('appWarning').textContent='Startup error: '+e.message}
 </script></html>
