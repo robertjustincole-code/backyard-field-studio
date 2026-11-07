@@ -63,14 +63,24 @@ async function transcribeClips(){
    let samples=new Float32Array(size),offset=0;for(let piece of pieces){samples.set(piece,offset);offset+=piece.length}
    let resampled=samples;
    if(ctx.sampleRate!==16000){resampled=new Float32Array(Math.ceil(samples.length*16000/ctx.sampleRate));for(let j=0;j<resampled.length;j++){let k=Math.min(samples.length-1,Math.floor(j*ctx.sampleRate/16000));resampled[j]=samples[k]}}
-   status.textContent='Step 3: Whisper recognition running. If phone lags, close this tab.';const result=await speechPipeline(resampled,{chunk_length_s:25,stride_length_s:5,return_timestamps:false});
-   if(result.text?.trim())parts.push(result.text.trim());if(result.chunks?.length){p.captions??=[];let prior=0;for(let j=0;j<i;j++){const priorClip=p.clips[j];if(priorClip)prior+=Math.max(0,(priorClip.end||0)-(priorClip.start||0))}for(const chunk of result.chunks){let t=chunk.timestamp||[0,0];p.captions.push({text:chunk.text.trim(),start:prior+(t[0]||0),end:prior+(t[1]||t[0]+2),x:50,y:75})}persist();renderCaptions()}
-   $('transcript').value=[$('transcript').value.trim(),...parts].filter(Boolean).join('\n\n');saveMeta();
+   status.textContent='Step 3: Generating timed captions…';
+   const result=await speechPipeline(resampled,{chunk_length_s:25,stride_length_s:5,return_timestamps:true});
+   const words=(result.text||'').trim();let prior=0;
+   for(let j=0;j<i;j++){const pc=p.clips[j];if(pc)prior+=Math.max(0,(pc.end||0)-(pc.start||0))}
+   const duration=Math.max(.1,(c.end||0)-(c.start||0));
+   const chunks=(result.chunks||[]).filter(x=>x.text?.trim());
+   const entries=chunks.length?chunks.map(x=>({text:x.text.trim(),start:prior+Math.max(0,x.timestamp?.[0]||0),end:prior+Math.min(duration,x.timestamp?.[1]??duration),x:50,y:75,clipIndex:i})):words?[{text:words,start:prior,end:prior+duration,x:50,y:75,clipIndex:i}]:[];
+   p.captions=(p.captions||[]).filter(x=>x.clipIndex!==i);p.captions.push(...entries);
+   p.clipTranscripts??={};p.clipTranscripts[i]=words;
+   p.transcript=Object.keys(p.clipTranscripts).sort((a,b)=>Number(a)-Number(b)).map(k=>p.clipTranscripts[k]).filter(Boolean).join('\\n\\n');
+   $('transcript').value=p.transcript;persist();renderCaptions();
+   parts=entries.length?[words]:[];
+
   }
   status.textContent=parts.length?'Transcription complete. Review and copy below.':'No speech detected in the available clips.';
  }catch(e){status.textContent='Transcription failed: '+(e.message||String(e))+' Existing transcript has been kept.'}
  finally{btn.disabled=false}
 }
 
-try{list();$('appWarning').textContent='App loaded · build 9 · caption editor'}catch(e){$('appWarning').textContent='App startup error: '+e.message;console.error(e)}
+try{list();$('appWarning').textContent='App loaded · build 10 · timed captions'}catch(e){$('appWarning').textContent='App startup error: '+e.message;console.error(e)}
 </script></html>
