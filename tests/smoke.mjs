@@ -24,6 +24,16 @@ try{
  await page.getByRole('button',{name:'← Projects'}).click();
  await page.getByRole('button',{name:'Open project'}).click();
  assert.equal(await page.locator('#common').inputValue(),'Horned crab');
+ const seekResult=await page.evaluate(async()=>{
+   const video={currentTime:0,readyState:1,seeking:false,error:null};
+   await seekVideo(video,0);
+   await seekVideo(video,0.05);
+   video.currentTime=0;
+   Object.defineProperty(video,'currentTime',{get(){return this._time||0},set(value){this._time=value;this.seeking=true;setTimeout(()=>{this.seeking=false},30)}});
+   await seekVideo(video,2.5);
+   return video.currentTime;
+ });
+ assert.equal(seekResult,2.5);
  assert.deepEqual(errors,[]);
  console.log('PASS: app boot, species CRUD, seven slots, filming queue, persistence, no JS errors');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}
