@@ -28,10 +28,11 @@ try {
     return path;
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  browser = await webkit.launch();
+  browser = await webkit.launch({ headless: false });
   const page = await browser.newPage({ acceptDownloads: true });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => console.log('browser:', message.type(), message.text()));
   await page.goto('http://127.0.0.1:' + server.address().port);
   await page.getByRole('button', { name: '+ New species' }).click();
   const sections = page.locator('#segments section');
@@ -39,10 +40,22 @@ try {
   for (const [index, slot] of slots.entries()) {
     const section = sections.nth(slot);
     await section.locator('input[type=file]').setInputFiles(clips[index]);
-    await page.waitForFunction(i => {
-      const video = document.querySelectorAll('#segments video')[i];
-      return video.readyState >= 1 && Number.isFinite(video.duration);
-    }, slot);
+    const video = section.locator('video');
+    try {
+      await page.waitForFunction(i => {
+        const video = document.querySelectorAll('#segments video')[i];
+        return video.error || (video.readyState >= 1 && Number.isFinite(video.duration));
+      }, slot, { polling: 100, timeout: 10000 });
+      assert.equal(await video.evaluate(element => element.error?.message), undefined);
+    } catch (error) {
+      const details = await video.evaluate(element => ({
+        src: element.getAttribute('src'), readyState: element.readyState,
+        networkState: element.networkState, error: element.error?.message,
+        canPlay: element.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
+        saved: JSON.parse(localStorage.getItem('bfs_projects'))[0].clips
+      }));
+      throw Error('Fixture failed in slot ' + slot + ': ' + JSON.stringify({ details, errors }), { cause: error });
+    }
     await section.locator('.start').fill('0.3');
     await section.locator('.end').fill('1.3');
     await section.locator('.end').press('Tab');
@@ -50,7 +63,8 @@ try {
 
   await page.reload();
   await page.getByRole('button', { name: 'Open project' }).click();
-  assert.equal(await sections.nth(0).locator('.start').inputValue(), '0.3');
+  await page.waitForFunction(() => document.querySelector('#segments .start').value === '0.3',
+    null, { polling: 100, timeout: 10000 });
   const status = page.locator('#status');
   await page.getByRole('button', { name: 'Stitch video' }).click();
   try {
