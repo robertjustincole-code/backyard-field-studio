@@ -39,7 +39,9 @@ try {
 
   for (const [index, slot] of slots.entries()) {
     const section = sections.nth(slot);
-    await section.locator('input[type=file]').setInputFiles(clips[index]);
+    await section.locator('input[type=file]').setInputFiles({
+      name: colors[index] + '.mp4', mimeType: 'video/mp4', buffer: await readFile(clips[index])
+    });
     const video = section.locator('video');
     try {
       await page.waitForFunction(i => {
@@ -52,6 +54,7 @@ try {
         src: element.getAttribute('src'), readyState: element.readyState,
         networkState: element.networkState, error: element.error?.message,
         canPlay: element.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
+        fileState: element.closest('section').querySelector('.fileState').textContent,
         saved: JSON.parse(localStorage.getItem('bfs_projects'))[0].clips
       }));
       throw Error('Fixture failed in slot ' + slot + ': ' + JSON.stringify({ details, errors }), { cause: error });
