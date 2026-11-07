@@ -1,38 +1,108 @@
-import { chromium } from 'playwright';
-import { spawnSync } from 'node:child_process';
-import { readFile, mkdtemp, stat } from 'node:fs/promises';
+import { webkit } from 'playwright';
+import { execFileSync } from 'node:child_process';
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 
-const dir=await mkdtemp(join(tmpdir(),'bfs-export-'));
-const clip=join(dir,'sample.mp4');
-const ff=spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=320x568:rate=15','-f','lavfi','-i','sine=frequency=440:sample_rate=44100','-t','1.2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest','-y',clip],{encoding:'utf8'});
-if(ff.status!==0)throw Error('ffmpeg failed: '+(ff.error?.message||ff.stderr||'exit '+ff.status));
-const html=await readFile('index.html');
-const server=createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html'});res.end(html)});
-await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required']});
-try{
- const page=await browser.newPage({acceptDownloads:true});
- page.on('console',m=>console.log('browser:',m.type(),m.text()));
- page.on('pageerror',e=>console.error('PAGE ERROR:',e.message));
- await page.goto('http://127.0.0.1:'+server.address().port);
- await page.getByRole('button',{name:'+ New species'}).click();
- const inputs=page.locator('#segments input[type=file]');
- for(const i of [0,1,2,3,5,6])await inputs.nth(i).setInputFiles(clip);
- await page.waitForFunction(()=>Object.keys(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips).length===6);
- await page.waitForTimeout(1500);
- await page.getByRole('button',{name:'Stitch video'}).click();
- await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Export complete')||document.querySelector('#status').textContent.includes('Render failed'),null,{timeout:90000});
- const status=await page.locator('#status').innerText();
- assert.match(status,/Export complete/,status);
- const link=page.locator('#download a');assert.equal(await link.count(),1);
- const download=await Promise.all([page.waitForEvent('download'),link.click()]).then(x=>x[0]);
- const path=await download.path();const info=await stat(path);
- assert.ok(info.size>10000,'Output video too small');
- const probe=spawnSync('ffprobe',['-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1',path],{encoding:'utf8'});
- assert.equal(probe.status,0,probe.stderr);
- console.log('PASS: stitched 6 real clips into playable video',info.size,'bytes',probe.stdout.trim());
-}finally{await browser.close();await new Promise(resolve=>server.close(resolve))}
+const dir = await mkdtemp(join(tmpdir(), 'bfs-export-'));
+const html = await readFile('index.html');
+const server = createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(html);
+});
+const slots = [0, 1, 2, 3, 5, 6];
+const colors = ['red', 'lime', 'blue', 'yellow', 'magenta', 'cyan'];
+const expected = [[255,0,0], [0,255,0], [0,0,255], [255,255,0], [255,0,255], [0,255,255]];
+let browser;
+
+try {
+  const clips = colors.map((color, index) => {
+    const path = join(dir, color + '.mp4');
+    execFileSync('ffmpeg', [
+      '-v', 'error', '-f', 'lavfi', '-i', 'color=' + color + ':size=320x568:rate=30',
+      '-f', 'lavfi', '-i', 'sine=frequency=' + (440 + index * 110) + ':sample_rate=48000',
+      '-t', '1.5', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-y', path
+    ]);
+    return path;
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  browser = await webkit.launch();
+  const page = await browser.newPage({ acceptDownloads: true });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('http://127.0.0.1:' + server.address().port);
+  await page.getByRole('button', { name: '+ New species' }).click();
+  const sections = page.locator('#segments section');
+
+  for (const [index, slot] of slots.entries()) {
+    const section = sections.nth(slot);
+    await section.locator('input[type=file]').setInputFiles(clips[index]);
+    await page.waitForFunction(i => {
+      const video = document.querySelectorAll('#segments video')[i];
+      return video.readyState >= 1 && Number.isFinite(video.duration);
+    }, slot);
+    await section.locator('.start').fill('0.3');
+    await section.locator('.end').fill('1.3');
+    await section.locator('.end').press('Tab');
+  }
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Open project' }).click();
+  assert.equal(await sections.nth(0).locator('.start').inputValue(), '0.3');
+  const status = page.locator('#status');
+  await page.getByRole('button', { name: 'Stitch video' }).click();
+  try {
+    await page.waitForFunction(() =>
+      /Export complete|Render failed|cannot record/.test(document.querySelector('#status').textContent),
+      null, { timeout: 90000 });
+  } catch (error) {
+    throw Error('Export stalled: ' + await status.innerText(), { cause: error });
+  }
+  assert.match(await status.innerText(), /Export complete/);
+  assert.deepEqual(errors, []);
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('link', { name: /Download finished video/ }).click()
+  ]);
+  assert.equal(download.suggestedFilename(), 'species-1.mp4');
+  const path = await download.path();
+  const { streams, format } = JSON.parse(execFileSync('ffprobe', [
+    '-v', 'error', '-show_streams', '-show_format', '-of', 'json', path
+  ], { encoding: 'utf8' }));
+  assert.match(format.format_name, /mp4/);
+  const video = streams.find(stream => stream.codec_type === 'video');
+  const audio = streams.find(stream => stream.codec_type === 'audio');
+  assert.equal(video?.codec_name, 'h264');
+  assert.equal(audio?.codec_name, 'aac');
+  assert.deepEqual([video.width, video.height], [720, 1280]);
+  assert.ok(Math.abs(Number(format.duration) - 6) < 0.75, 'Expected six one-second trims: ' + format.duration);
+  for (const [index, color] of expected.entries()) {
+    const pixel = execFileSync('ffmpeg', [
+      '-v', 'error', '-ss', String(index + 0.5), '-i', path,
+      '-vf', 'scale=1:1,format=rgb24', '-frames:v', '1', '-f', 'rawvideo', '-'
+    ]);
+    assert.equal(pixel.length, 3);
+    assert.ok(color.every((value, channel) => Math.abs(value - pixel[channel]) < 35),
+      'Wrong clip at ' + (index + 0.5) + 's: ' + [...pixel]);
+  }
+  const samples = execFileSync('ffmpeg', [
+    '-v', 'error', '-i', path, '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', '-'
+  ]);
+  for (const index of slots.keys()) {
+    const start = (index * 8000 + 2400) * 2;
+    const end = start + 3200 * 2;
+    let peak = 0;
+    for (let offset = start; offset < Math.min(end, samples.length - 1); offset += 2) {
+      peak = Math.max(peak, Math.abs(samples.readInt16LE(offset)));
+    }
+    assert.ok(peak > 500, 'Missing audio in clip ' + (index + 1));
+  }
+  console.log('PASS: six saved clips trimmed in order, downloaded and decoded as portrait H.264/AAC MP4');
+} finally {
+  await browser?.close();
+  if (server.listening) await new Promise(resolve => server.close(resolve));
+  await rm(dir, { recursive: true, force: true });
+}
