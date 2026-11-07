@@ -16,7 +16,7 @@ try{
  await page.locator('#common').fill('Horned crab');
  await page.locator('#latin').fill('Testus example');
  assert.match(await page.locator('#heading').innerText(),/Horned crab/);
- assert.equal(await page.locator('#segments section').count(),8);
+ assert.equal(await page.getByRole('navigation',{name:'Clip pages'}).getByRole('button').count(),7);
  await page.getByRole('button',{name:'← Projects'}).click();
  assert.match(await page.locator('#projects').innerText(),/0\/6 required clips/);
  await page.getByRole('button',{name:'Filming queue'}).click();
@@ -35,5 +35,5 @@ try{
  });
  assert.equal(seekResult,2.5);
  assert.deepEqual(errors,[]);
- console.log('PASS: app boot, species CRUD, eight slots, filming queue, persistence, no JS errors');
+ console.log('PASS: app boot, species CRUD, seven clip pages, filming queue, persistence, no JS errors');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve))}

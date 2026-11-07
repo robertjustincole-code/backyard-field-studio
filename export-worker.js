@@ -35,7 +35,8 @@ self.onmessage = async ({ data: clips }) => {
       const { format, streams } = JSON.parse(fs.readFile('probe.json', { encoding: 'utf8' }));
       fs.unlink('probe.json');
       const begin = Math.max(0, clip.start || 0);
-      const end = Math.min(Number(format.duration), clip.end || Number(format.duration));
+      const available = Number(format?.duration) || clip.recordedDuration;
+      const end = Math.min(available, clip.end || available);
       if (!Number.isFinite(end) || end <= begin) throw Error('Invalid trim');
       return { begin, duration: end - begin, streams };
     }
@@ -73,8 +74,8 @@ self.onmessage = async ({ data: clips }) => {
         ];
         if (voice) videoFilters.unshift('trim=duration=' + duration);
         videoFilters.push('setpts=(PTS-STARTPTS)/' + videoSpeed, 'fps=30');
-        if (voice) videoFilters.push('tpad=stop_mode=clone:stop=-1');
-        if (tail) videoFilters.push('trim=duration=' + duration, 'tpad=stop_mode=add:stop_duration=' + tail + ':color=black');
+        if (voice) videoFilters.push('tpad=stop_mode=clone:stop=-1', 'trim=duration=' + videoDuration);
+        if (tail) videoFilters.push('trim=duration=' + videoDuration, 'tpad=stop_mode=add:stop_duration=' + tail + ':color=black');
         const titleInput = audioInput.length ? 2 : 1;
         encode([
           '-loglevel', 'error', '-ss', String(begin), '-i', input,
