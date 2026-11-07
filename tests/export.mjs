@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 const dir=await mkdtemp(join(tmpdir(),'bfs-export-'));
 const clip=join(dir,'sample.mp4');
 const ff=spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=320x568:rate=15','-f','lavfi','-i','sine=frequency=440:sample_rate=44100','-t','1.2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest','-y',clip],{encoding:'utf8'});
-if(ff.status!==0)throw Error('ffmpeg failed: '+ff.stderr);
+if(ff.status!==0)throw Error('ffmpeg failed: '+(ff.error?.message||ff.stderr||'exit '+ff.status));
 const html=await readFile('index.html');
 const server=createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html'});res.end(html)});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
