@@ -102,10 +102,12 @@ try {
   const audio = streams.find(stream => stream.codec_type === 'audio');
   assert.equal(video?.codec_name, 'h264');
   assert.equal(audio?.codec_name, 'aac');
+  assert.equal(audio.sample_rate, '48000');
+  assert.equal(video.avg_frame_rate, '30/1');
   assert.deepEqual([video.width, video.height], [720, 1280]);
   console.log('MP4 timing:', format.duration, 'seconds', video.avg_frame_rate, 'fps', audio.sample_rate, 'Hz',
     'stream durations:', video.duration, audio.duration);
-  assert.ok(Math.abs(Number(format.duration) - 6) < 0.75, 'Expected six one-second trims: ' + format.duration);
+  assert.ok(Math.abs(Number(format.duration) - 6) < 0.15, 'Expected six one-second trims: ' + format.duration);
   for (const [index, color] of expected.entries()) {
     const pixel = execFileSync('ffmpeg', [
       '-v', 'error', '-ss', String(index + 0.5), '-i', path,

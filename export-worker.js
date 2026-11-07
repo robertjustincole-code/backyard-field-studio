@@ -16,9 +16,9 @@ self.onmessage = async ({ data: clips }) => {
       if (log.length > 24) log.shift();
     });
 
-    function run(method, args) {
+    function encode(args) {
       log = [];
-      core[method](...args);
+      core.exec(...args);
       const result = core.ret;
       core.reset();
       if (result !== 0) throw Error(log.slice(-5).join(' ') || 'FFmpeg exited with code ' + result);
@@ -32,10 +32,13 @@ self.onmessage = async ({ data: clips }) => {
       const output = 'part-' + index + '.mp4';
       fs.mount(fs.filesystems.WORKERFS, { blobs: [{ name: 'clip', data: file }] }, '/source');
       try {
-        run('ffprobe', [
+        log = [];
+        core.ffprobe(
           '-v', 'error', '-show_entries', 'format=duration:stream=codec_type',
           '-of', 'json', input, '-o', 'probe.json'
-        ]);
+        );
+        core.reset();
+        if (!fs.analyzePath('probe.json').exists) throw Error(log.slice(-5).join(' ') || 'Cannot read clip');
         const { format, streams } = JSON.parse(fs.readFile('probe.json', { encoding: 'utf8' }));
         fs.unlink('probe.json');
         if (!streams.some(stream => stream.codec_type === 'video')) throw Error('No video track');
@@ -43,7 +46,7 @@ self.onmessage = async ({ data: clips }) => {
         const end = Math.min(Number(format.duration), clip.end || Number(format.duration));
         if (!Number.isFinite(end) || end <= begin) throw Error('Invalid trim');
         const audio = streams.some(stream => stream.codec_type === 'audio');
-        run('exec', [
+        encode([
           '-loglevel', 'error', '-ss', String(begin), '-i', input,
           ...(audio ? [] : ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']),
           '-map', '0:v:0', '-map', audio ? '0:a:0' : '1:a:0',
@@ -64,7 +67,7 @@ self.onmessage = async ({ data: clips }) => {
 
     self.postMessage({ status: 'Finalizing MP4…', index: clips.length });
     fs.writeFile('parts.txt', parts.map(path => "file '" + path + "'").join('\n'));
-    run('exec', [
+    encode([
       '-loglevel', 'error', '-f', 'concat', '-safe', '1', '-i', 'parts.txt',
       '-c', 'copy', '-movflags', '+faststart', 'species.mp4'
     ]);
