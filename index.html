@@ -49,7 +49,8 @@ async function render(){
  if(button.disabled)return;
  button.disabled=true;
  progress.value=0;
- if(download.firstChild)URL.revokeObjectURL(download.firstChild.href);
+ const previousLink=download.querySelector('a[download]');
+ if(previousLink)URL.revokeObjectURL(previousLink.href);
  download.replaceChildren();
  status.textContent='Preparing export…';
  let worker;
@@ -78,15 +79,40 @@ async function render(){
    worker.postMessage(clips);
   }),15*60*1000,'Export timed out');
   if(!video.byteLength)throw Error('Export was empty');
-  const blob=new Blob([video],{type:'video/mp4'});
+  const file=new File([video],'species-'+project.number+'.mp4',{type:'video/mp4'});
+  const url=URL.createObjectURL(file);
+  const preview=document.createElement('video');
+  preview.controls=true;
+  preview.playsInline=true;
+  preview.preload='metadata';
+  preview.setAttribute('aria-label','Finished video preview');
+  preview.src=url;
+  const share=document.createElement('button');
+  share.textContent='Share or save video';
+  const shareData={files:[file]};
+  const canShare=typeof navigator.share==='function'&&navigator.canShare?.(shareData);
+  const hint=document.createElement('p');
+  hint.setAttribute('role','status');
+  share.onclick=async()=>{
+   try{
+    await navigator.share(shareData);
+    hint.textContent='';
+   }catch(error){
+    if(error.name!=='AbortError')hint.textContent='Could not open sharing. Try the download link and choose Files as the save location.';
+   }
+  };
   const link=document.createElement('a');
-  link.href=URL.createObjectURL(blob);
-  link.download='species-'+project.number+'.mp4';
-  link.textContent='Download finished video ('+(blob.size/1048576).toFixed(1)+' MB)';
+  link.href=url;
+  link.download=file.name;
+  link.textContent='Download finished video ('+(file.size/1048576).toFixed(1)+' MB)';
   link.style.display='block';
-  download.replaceChildren(link);
+  download.append(preview);
+  if(canShare)download.append(share);
+  download.append(link,hint);
   progress.value=100;
-  status.textContent='Export complete. Tap the download link to save the MP4.';
+  status.textContent=canShare
+   ? 'Export complete. Preview it here, or tap Share or save video and choose Save to Files.'
+   : 'Export complete. Preview it here or download the MP4. If asked where to save, choose Files.';
  }catch(error){
   status.textContent='Render failed: '+error.message;
  }finally{
@@ -95,5 +121,5 @@ async function render(){
  }
 }
 
-try{list();$('appWarning').textContent='Field Studio · MP4 export'}catch(e){$('appWarning').textContent='Startup error: '+e.message}
+try{list();$('appWarning').textContent='Field Studio · MP4 export and sharing'}catch(e){$('appWarning').textContent='Startup error: '+e.message}
 </script></html>
