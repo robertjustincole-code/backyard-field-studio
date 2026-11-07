@@ -41,9 +41,19 @@ async function transcribeClips(){
      const source=ctx.createMediaElementSource(video),node=ctx.createScriptProcessor(4096,2,1),gain=ctx.createGain();
      gain.gain.value=0;source.connect(node);node.connect(gain);gain.connect(ctx.destination);
      node.onaudioprocess=e=>{let buffer=e.inputBuffer,chunk=new Float32Array(buffer.length);for(let channel=0;channel<buffer.numberOfChannels;channel++){let samples=buffer.getChannelData(channel);for(let j=0;j<chunk.length;j++)chunk[j]+=samples[j]/buffer.numberOfChannels}pieces.push(chunk);size+=chunk.length};
-     video.currentTime=start;
-     await new Promise(ok=>{if(start===0)ok();else video.onseeked=ok});
-     await ctx.resume();await video.play();
+     if(start>0.05){
+       await new Promise((ok,fail)=>{
+         let done=false;
+         const timer=setTimeout(()=>{if(!done){done=true;fail(Error('Video seek timed out after 8 seconds'))}},8000);
+         video.addEventListener('seeked',()=>{if(!done){done=true;clearTimeout(timer);ok()}},{once:true});
+         video.currentTime=start;
+         if(!video.seeking&&Math.abs(video.currentTime-start)<0.1){done=true;clearTimeout(timer);ok()}
+       });
+     }else video.currentTime=0;
+     status.textContent='Step 2: Starting playback for audio capture…';
+     await Promise.race([ctx.resume(),new Promise((_,fail)=>setTimeout(()=>fail(Error('Audio engine timed out')),8000))]);
+     await Promise.race([video.play(),new Promise((_,fail)=>setTimeout(()=>fail(Error('Video playback timed out')),8000))]);
+     status.textContent='Step 2: Recording selected audio range…';
      await new Promise((ok,fail)=>{const timer=setTimeout(()=>fail(Error('Capture timeout')),Math.max(15000,(end-start+8)*1000));function tick(){if(video.currentTime>=end||video.ended){clearTimeout(timer);ok()}else setTimeout(tick,100)}tick()});
      video.pause();node.disconnect();source.disconnect();gain.disconnect();
    }finally{video.pause();await ctx.close();URL.revokeObjectURL(url)}
@@ -60,5 +70,5 @@ async function transcribeClips(){
  finally{btn.disabled=false}
 }
 
-try{list();$('appWarning').textContent='App loaded · build 7 · one clip'}catch(e){$('appWarning').textContent='App startup error: '+e.message;console.error(e)}
+try{list();$('appWarning').textContent='App loaded · build 8 · seek timeout fix'}catch(e){$('appWarning').textContent='App startup error: '+e.message;console.error(e)}
 </script></html>
