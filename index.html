@@ -270,7 +270,7 @@ function openClipEditor(project,name,index,page,isNarration=false){
    <button type="button" class="setStart muted clip-controls" disabled>Set start at playhead</button>
    <button type="button" class="setEnd muted clip-controls" disabled>Set end at playhead</button>
   </div>
-  <button type="button" class="remove-narration muted" hidden>Remove narration</button>
+  <button type="button" class="remove-narration muted" hidden>Discard voiceover</button>
   <p class="preview-status" role="status"></p>`;
  const select=selector=>section.querySelector(selector);
  const video=select('video'),input=select('input[type=file]'),fileState=select('.fileState');
@@ -457,9 +457,10 @@ function openClipEditor(project,name,index,page,isNarration=false){
     controls.forEach(control=>control.disabled=true);
     select('.trim-length').textContent='';
     fileState.textContent='Optional, can skip';
+    section.dispatchEvent(new Event('voiceover-discarded'));
    }
   }catch(error){
-   status.textContent='Could not remove narration: '+error.message;
+   status.textContent='Could not discard voiceover: '+error.message;
   }finally{input.disabled=remove.disabled=false}
  };
  disposeClipEditors.push(()=>{
@@ -474,7 +475,7 @@ function openClipEditor(project,name,index,page,isNarration=false){
  else loadFile(key).then(file=>{
   if(file&&!disposed&&!input.disabled&&!files[key]){files[key]=file;load(file)}
  });
- return {section,video,saveFile};
+ return {section,video,saveFile,discard:remove};
 }
 function addVoiceRecorder(project,index,footage,voiceover){
  const {section,video}=footage;
@@ -483,7 +484,10 @@ function addVoiceRecorder(project,index,footage,voiceover){
  button.textContent='Record voiceover';
  const status=document.createElement('p');
  status.setAttribute('role','status');
- video.before(button,status);
+ video.before(button,voiceover.discard,status);
+ voiceover.section.addEventListener('voiceover-discarded',()=>{
+  status.textContent='Voiceover discarded. This clip will use its original audio.';
+ });
  let finish;
  button.onclick=async()=>{
   if(finish){finish();return}
