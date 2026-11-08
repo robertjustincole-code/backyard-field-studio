@@ -109,13 +109,10 @@ try {
   await page.getByRole('button', { name: 'Record voiceover' }).click();
   await page.getByText('Voiceover saved. Preview or trim it below.').waitFor({ timeout: 15000 });
   await page.evaluate(() => window.testAudio.close());
-  const secondVoice = pages.nth(1).locator('section').last();
-  await secondVoice.getByRole('button', { name: 'Remove narration' }).click();
-  await secondVoice.getByText('Optional, can skip').waitFor();
-  await secondVoice.locator('input[type=file]').setInputFiles(clips[0]);
-  await secondVoice.locator('.start').fill('0.3');
-  await secondVoice.locator('.end').fill('1.3');
-  await secondVoice.locator('.end').press('Tab');
+  const discard = pages.nth(1).getByRole('button', { name: 'Discard voiceover' });
+  await discard.click();
+  await page.getByText('Voiceover discarded. This clip will use its original audio.').waitFor();
+  assert.equal(await discard.isVisible(), false);
 
   await tabs.nth(0).click();
   const first = pages.nth(0).locator('section').first();
@@ -167,7 +164,7 @@ try {
   assert.equal(await firstComplete.isChecked(), true);
   const trims = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('bfs_projects'))[0].clips)
     .map(({ start, end }) => [start, end]));
-  assert.deepEqual(trims, [...slots.map(() => [0.3, 1.3]), [0.1, 1.3], [0.3, 1.3]]);
+  assert.deepEqual(trims, [...slots.map(() => [0.3, 1.3]), [0.1, 1.3]]);
   const status = page.locator('#status');
   await page.getByRole('button', { name: 'Stitch video' }).click();
   try {
@@ -254,12 +251,12 @@ try {
     }
     assert.ok(peak > 500, 'Missing audio in clip ' + (index + 1));
   }
-  for (const start of [11200, 28000]) {
+  for (const [start, expectedCrossings] of [[11200, 110], [28000, 88]]) {
     let crossings = 0;
     for (let sample = start + 1; sample < start + 1600; sample++) {
       if (samples.readInt16LE((sample - 1) * 2) <= 0 && samples.readInt16LE(sample * 2) > 0) crossings++;
     }
-    assert.ok(Math.abs(crossings - 88) <= 3, 'Expected 440 Hz voiceover at sample ' + start + ': ' + crossings);
+    assert.ok(Math.abs(crossings - expectedCrossings) <= 3, 'Wrong audio track at sample ' + start + ': ' + crossings);
   }
   console.log('PASS: six saved clips trimmed in order, downloaded and decoded as portrait H.264/AAC MP4');
 } finally {
