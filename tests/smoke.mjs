@@ -17,6 +17,19 @@ try{
  await page.locator('#latin').fill('Testus example');
  assert.match(await page.locator('#heading').innerText(),/Horned crab/);
  assert.equal(await page.getByRole('navigation',{name:'Clip pages'}).getByRole('button').count(),7);
+ assert.equal(await page.getByRole('heading',{name:'Find stock footage'}).isVisible(),false);
+ await page.getByRole('button',{name:/Clip 6/}).click();
+ const stock=page.locator('#footageSearch');
+ assert.equal(await stock.isVisible(),true);
+ for(const [label,term] of [['common name','Horned crab'],['scientific name','Testus example']]){
+   const href=await stock.getByRole('link',{name:new RegExp(label)}).getAttribute('href');
+   const search=new URL(href);
+   assert.equal(search.hostname,'commons.wikimedia.org');
+   assert.equal(search.searchParams.get('type'),'video');
+   assert.equal(search.searchParams.get('search'),term);
+ }
+ await page.locator('#latin').fill('Updated species');
+ assert.match(await stock.getByRole('link',{name:/scientific name/}).innerText(),/Updated species/);
  await page.getByRole('button',{name:'← Projects'}).click();
  assert.match(await page.locator('#projects').innerText(),/0\/6 clips complete/);
  await page.getByRole('button',{name:'Filming queue'}).click();
