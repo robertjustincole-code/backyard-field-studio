@@ -91,7 +91,21 @@ function list(){
 }
 function newProject(){let p={id:crypto.randomUUID(),number:Math.max(0,...projects.map(x=>x.number))+1,common:'',latin:'',notes:'',transcript:'',clips:{}};projects.push(p);persist();openProject(p.id)}
 function cur(){return projects.find(p=>p.id===active)}
-function saveMeta(){let p=cur();if(!p)return;if(p.common!==$('common').value||p.latin!==$('latin').value)delete p.exported;for(const k of ['common','latin','notes'])p[k]=$(k).value;persist();$('heading').textContent='#'+p.number+' '+(p.common||'New species');const search=$('footageSearch');if(search)search.replaceWith(footageSearch(p))}
+function saveMeta(){
+ const project=cur();
+ if(!project)return;
+ const namesChanged=project.common!==$('common').value||project.latin!==$('latin').value;
+ if(namesChanged)delete project.exported;
+ for(const key of ['common','latin','notes'])project[key]=$(key).value;
+ persist();
+ $('heading').textContent='#'+project.number+' '+(project.common||'New species');
+ const search=$('footageSearch');
+ if(namesChanged&&search){
+  const replacement=footageSearch(project);
+  search.replaceWith(replacement);
+  if(!replacement.closest('.clip-page').hidden)scheduleFootageCheck(replacement);
+ }
+}
 function saveSpeciesNumber(){
  const project=cur(),input=$('speciesNumber');
  const number=input.valueAsNumber;
@@ -127,6 +141,7 @@ function openProject(id,nextIndex){
    if(page.hidden)page.querySelectorAll('video').forEach(video=>video.pause());
    tabs[i].setAttribute('aria-current',String(i===index));
   });
+  if(index===5)scheduleFootageCheck($('footageSearch'));
  };
  names.forEach((name,index)=>{
   const page=document.createElement('div');
@@ -181,19 +196,55 @@ function footageSearch(project){
  for(const [field,label] of [['common','common name'],['latin','scientific name']]){
   const term=project[field]?.trim();
   if(!term)continue;
-  const url=new URL('https://commons.wikimedia.org/wiki/Special:MediaSearch');
-  url.search=new URLSearchParams({type:'video',search:term});
+  const query=term+' filetype:video';
+  const url=new URL('https://commons.wikimedia.org/w/index.php');
+  url.search=new URLSearchParams({title:'Special:Search',ns6:'1',search:query});
   const link=document.createElement('a');
   link.href=url.href;
   link.target='_blank';
   link.rel='noopener noreferrer';
   link.textContent='Search by '+label+' ('+term+')';
   const line=document.createElement('p');
-  line.append(link);
+  const status=document.createElement('small');
+  status.dataset.query=query;
+  status.setAttribute('role','status');
+  line.append(link,' · ',status);
   links.append(line);
  }
  if(!links.childElementCount)links.textContent='Enter a common or scientific name above to search for videos.';
  return section;
+}
+
+function scheduleFootageCheck(panel){
+ setTimeout(()=>{
+  if(!panel.isConnected||panel.closest('.clip-page').hidden)return;
+  for(const status of panel.querySelectorAll('[data-query]')){
+   if(!status.dataset.checked)checkFootageCount(status);
+  }
+ },300);
+}
+
+async function checkFootageCount(status){
+ status.dataset.checked='true';
+ status.textContent='Checking for videos…';
+ const url=new URL('https://commons.wikimedia.org/w/api.php');
+ url.search=new URLSearchParams({
+  action:'query',list:'search',srnamespace:'6',srlimit:'1',srinfo:'totalhits',
+  srprop:'',srsearch:status.dataset.query,format:'json',origin:'*'
+ });
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),8000);
+ try{
+  const response=await fetch(url,{signal:controller.signal});
+  if(!response.ok)throw Error('Search request failed');
+  const data=await response.json();
+  const count=data.query?.searchinfo?.totalhits;
+  if(!Number.isSafeInteger(count)||count<0)throw Error('Search count unavailable');
+  status.textContent=count===0?'No videos found':count===1?'1 video found':count.toLocaleString()+' videos found';
+ }catch{
+  status.textContent='Couldn’t check the count';
+  delete status.dataset.checked;
+ }finally{clearTimeout(timer)}
 }
 
 function openClipEditor(project,name,index,page,isNarration=false){

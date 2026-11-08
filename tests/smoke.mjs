@@ -11,6 +11,11 @@ const browser=await chromium.launch({headless:true});
 try{
  const page=await browser.newPage();
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('https://commons.wikimedia.org/w/api.php?**',route=>{
+   const query=new URL(route.request().url()).searchParams.get('srsearch');
+   if(query==='Updated species filetype:video')return route.abort();
+   return route.fulfill({json:{query:{searchinfo:{totalhits:query==='Horned crab filetype:video'?0:3}}}});
+ });
  await page.goto(url);
  await page.getByRole('button',{name:'+ New species'}).click();
  await page.locator('#common').fill('Horned crab');
@@ -25,11 +30,14 @@ try{
    const href=await stock.getByRole('link',{name:new RegExp(label)}).getAttribute('href');
    const search=new URL(href);
    assert.equal(search.hostname,'commons.wikimedia.org');
-   assert.equal(search.searchParams.get('type'),'video');
-   assert.equal(search.searchParams.get('search'),term);
+   assert.equal(search.searchParams.get('ns6'),'1');
+   assert.equal(search.searchParams.get('search'),term+' filetype:video');
  }
+ await stock.getByText('No videos found',{exact:true}).waitFor();
+ await stock.getByText('3 videos found',{exact:true}).waitFor();
  await page.locator('#latin').fill('Updated species');
  assert.match(await stock.getByRole('link',{name:/scientific name/}).innerText(),/Updated species/);
+ await stock.getByText('Couldn’t check the count',{exact:true}).waitFor();
  await page.getByRole('button',{name:'← Projects'}).click();
  assert.match(await page.locator('#projects').innerText(),/0\/6 clips complete/);
  await page.getByRole('button',{name:'Filming queue'}).click();
